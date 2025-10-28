@@ -10,8 +10,8 @@ sys.path.insert(0, str(project_root))
 from dm4gnc.config.config import Config
 from dm4gnc.config.parser import ConfigParser
 from dm4gnc.utils.random_seed import random_seed
-
 from dm4gnc.data.dataset import Dataset
+from dm4gnc.pipeline.pipeline_manager import PipelineManager
 
 def main():
     # load config
@@ -36,6 +36,9 @@ def main():
     )
     dataset = dataset_builder.load_dataset()
     print(dataset)
+
+    # run stages
+    pipeline_manager = PipelineManager(config, dataset)
 
 
 if __name__ == "__main__":

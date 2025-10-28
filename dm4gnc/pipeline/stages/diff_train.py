@@ -17,9 +17,9 @@ class DiffTrainStage(BaseStage):
         
     def _load_checkpoints(self):
         pass
-
-    def run(self):
+    
+    def _save_checkpoints(self):
         pass
 
-    def _save_checkpoints(self):
+    def run(self):
         pass
