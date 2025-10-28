@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from ..layers import GraphConvSparse
 
-class GraphEncoder(nn.modules):
+class GraphEncoder(nn.Module):
     def __init__(self, feat_dim, hidden_dim, latent_dim, adj):
         super(GraphEncoder, self).__init__()
         self.feat_dim = feat_dim

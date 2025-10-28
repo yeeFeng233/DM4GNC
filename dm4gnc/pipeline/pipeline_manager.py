@@ -1,9 +1,9 @@
-from base_stage import BaseStage
-from stages import (VAETrainStage, VAEEncodeStage, VAEDecodeStage, 
+from .stages import (VAETrainStage, VAEEncodeStage, VAEDecodeStage, 
             DiffTrainStage, DiffSampleStage, 
             ClassifierTrainStage, ClassifierTestStage,
             FilterSamplesStage)
-from ..models import (VGAE, GaussianDiffusion, MLPDenoiser, get_named_beta_schedule, GCN_node_sparse, GradualWarmupScheduler)
+from ..models import (VGAE, GaussianDiffusion, MLPDenoiser, get_named_beta_schedule, 
+                        GCN_node_sparse, GradualWarmupScheduler)
 
 import torch
 import os
@@ -108,6 +108,7 @@ class PipelineManager:
     def run(self):
         start_idx = self.all_stages.index(self.stage_start)
         end_idx = self.all_stages.index(self.stage_end)
+        self.stages = {}
         for stage_name, stage_class in self.stage_classes.items():
             if stage_name in self.all_stages[start_idx:end_idx+1]:
                 self.stages[stage_name] = stage_class(self.config, self.dataset)

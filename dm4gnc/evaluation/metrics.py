@@ -9,6 +9,7 @@ def get_acc(adj_rec, adj_label):
     return accuracy
 
 def get_scores(edges_pos, edges_neg, adj_rec, adj_orig):
+    adj_rec = adj_rec.cpu()
 
     def sigmoid(x):
         return 1 / (1 + np.exp(-x))

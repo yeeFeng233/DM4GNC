@@ -19,7 +19,7 @@ class GradualWarmupScheduler(_LRScheduler):
                     self.finished = True
                 return self.after_scheduler.get_last_lr()
             return [base_lr * self.multiplier for base_lr in self.base_lrs]
-        return [base_lr * ((self.multiplier - 1.) * self.last_epoch / self.total_epoch + 1.) for base_lr in self.base_lrs]
+        return [base_lr * ((self.multiplier - 1.) * self.last_epoch / self.warm_epoch + 1.) for base_lr in self.base_lrs]
     def state_dict(self):
         warmdict = {key:value for key, value in self.__dict__.items() if (key != 'optimizer' and key != 'after_scheduler')}
         cosdict = {key:value for key, value in self.after_scheduler.__dict__.items() if key != 'optimizer'}
@@ -33,6 +33,6 @@ class GradualWarmupScheduler(_LRScheduler):
             if epoch is None:
                 self.after_scheduler.step(None)
             else:
-                self.after_scheduler.step(epoch - self.total_epoch)
+                self.after_scheduler.step(epoch - self.warm_epoch)
         else:
             return super(GradualWarmupScheduler, self).step(epoch)

@@ -20,8 +20,8 @@ class VAEEncodeStage(BaseStage):
         self.labels = dataset.y.to(self.device)
 
         self.VGAE = VGAE(feat_dim=self.config.feat_dim,
-                        hidden_dim=self.config.hidden_sizes[0],
-                        latent_dim=self.config.hidden_sizes[1],
+                        hidden_dim=self.config.vae.hidden_sizes[0],
+                        latent_dim=self.config.vae.hidden_sizes[1],
                         adj=self.adj).to(self.device)
         self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
                                             lr=self.config.vae.lr, 
@@ -37,18 +37,17 @@ class VAEEncodeStage(BaseStage):
         self._get_checkpoints_load_path()
         if not os.path.exists(self.checkpoints_load_path):
             raise FileNotFoundError(f"Checkpoint file not found: {self.checkpoints_load_path}")
-        checkpoint = torch.load(self.checkpoints_load_path, map_location=self.device)
+        checkpoint = torch.load(self.checkpoints_load_path, weights_only=True, map_location=self.device)
         self.VGAE.load_state_dict(checkpoint['vae_stage_dict'])
         self.optimizer_vae.load_state_dict(checkpoint['optimizer_vae_stage_dict'])
         adj_norm = checkpoint['adj_norm']
         self.features = checkpoint['features']
-        self.vae.reset_adj(adj_norm)
+        self.VGAE.reset_adj(adj_norm)
 
     def _save_checkpoints(self):
         self._get_checkpoints_save_path()
         checkpoint = {
             'stage': "vae_encode",
-            'config': self.config,
             'latents': self.z,
             'labels': self.labels
         }

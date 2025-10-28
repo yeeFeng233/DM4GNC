@@ -3,7 +3,7 @@ import torch.nn as nn
 from .encoder import GraphEncoder
 from .decoder import GraphDecoder
 
-class VGAE(nn.modele):
+class VGAE(nn.Module):
     def __init__(self, feat_dim, hidden_dim, latent_dim, adj):
         super(VGAE, self).__init__()
         self.adj = adj
@@ -30,5 +30,6 @@ class VGAE(nn.modele):
     
     def forward(self, x, sample=True):
         z = self.encode(x, sample=sample)
+        self.mean, self.log_std = self.encoder.mean, self.encoder.log_std
         feat, A_pred = self.decode(z)
         return feat, A_pred

@@ -21,8 +21,8 @@ class VAETrainStage(BaseStage):
         self.edge_index = dataset.edge_index.to(self.device)
 
         self.VGAE = VGAE(feat_dim=self.config.feat_dim,
-                        hidden_dim=self.config.hidden_sizes[0],
-                        latent_dim=self.config.hidden_sizes[1],
+                        hidden_dim=self.config.vae.hidden_sizes[0],
+                        latent_dim=self.config.vae.hidden_sizes[1],
                         adj=self.adj).to(self.device)
         self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
                                             lr=self.config.vae.lr, 
@@ -38,9 +38,9 @@ class VAETrainStage(BaseStage):
         return None
 
     def _save_checkpoints(self):
+        self._get_checkpoints_save_path()
         checkpoint = {
             'stage': "vae_train",
-            'config': self.config,
             'vae_stage_dict': self.best_vae_state,
             'optimizer_vae_stage_dict': self.best_optimizer_vae_state,
             'adj_norm': self.adj_norm,
@@ -109,7 +109,6 @@ class VAETrainStage(BaseStage):
         pos_weight = float(adj.shape[0] * adj.shape[0] - adj.sum()) / adj.sum()
         norm = adj.shape[0] * adj.shape[0] / float((adj.shape[0] * adj.shape[0] - adj.sum()) * 2)
 
-
         adj_label = adj_train + sp.eye(adj_train.shape[0])
         adj_label = sparse_to_tuple(adj_label)
 
@@ -124,13 +123,12 @@ class VAETrainStage(BaseStage):
                                     torch.Size(features[2])).to(self.device)
 
         weight_mask = adj_label.to_dense().view(-1) == 1
-        weight_tensor = torch.ones(weight_mask.size(0)) 
+        weight_tensor = torch.ones(weight_mask.size(0)).to(self.device) 
         weight_tensor[weight_mask] = pos_weight
 
-        self.vae.reset_adj(adj_norm)
+        self.VGAE.reset_adj(self.adj_norm)
         self.features = features
 
-        best_loss = float('inf')
         self.best_vae_state = None
         self.best_optimizer_vae_state = None
         best_epoch = 0
@@ -140,13 +138,13 @@ class VAETrainStage(BaseStage):
         for epoch in range(self.config.vae.epoch):
             self.VGAE.train()
             self.optimizer_vae.zero_grad()
-            feat_pred, A_pred = self.vae(features)
+            feat_pred, A_pred = self.VGAE(features)
 
             feat_loss = F.mse_loss(feat_pred[self.train_mask_vae], features.to_dense()[self.train_mask_vae])
             link_loss = norm * F.binary_cross_entropy(A_pred.view(-1), adj_label.to_dense().view(-1), weight=weight_tensor)
-            kl_loss =  -0.5/ A_pred.size(0) * (1 + 2*self.vae.log_std - self.vae.mean**2 - torch.exp(self.vae.log_std)**2).sum(1).mean()
+            kl_loss =  -0.5/ A_pred.size(0) * (1 + 2*self.VGAE.log_std - self.VGAE.mean**2 - torch.exp(self.VGAE.log_std)**2).sum(1).mean()
 
-            loss = self.config.coef_link * link_loss + self.config.coef_feat * feat_loss + self.config.coef_kl * kl_loss
+            loss = self.config.vae.coef_link * link_loss + self.config.vae.coef_feat * feat_loss + self.config.vae.coef_kl * kl_loss
             
             loss.backward()
             self.optimizer_vae.step()
@@ -160,10 +158,10 @@ class VAETrainStage(BaseStage):
             if val_roc + val_ap > best_score:
                 best_score = val_roc + val_ap
                 best_epoch = epoch
-                self.best_vae_state = {k: v.cpu().clone() for k, v in self.vae.state_dict().items()}
+                self.best_vae_state = {k: v.cpu().clone() for k, v in self.VGAE.state_dict().items()}
                 self.best_optimizer_vae_state = {k: v.cpu().clone() if torch.is_tensor(v) else v for k, v in self.optimizer_vae.state_dict().items()}
             else:
-                if epoch - best_epoch > self.config.patience_vae:
+                if epoch - best_epoch > self.config.vae.patience:
                     break
         test_roc, test_ap = get_scores(test_edges, test_edges_false, A_pred, adj_orig)
         print("End of training!", "test_roc=", "{:.5f}".format(test_roc), "test_ap=", "{:.5f}".format(test_ap))

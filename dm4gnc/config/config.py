@@ -18,7 +18,6 @@ class VAEConfig:
     coef_feat: float = 1.0
     coef_link: float = 1.0
     neighbor_map_dim: int = 2708
-    feat_emb_dim: int = 512
     shuffle: bool = True
     neg_ratio: int = 20
     patience: int = 100
@@ -71,6 +70,7 @@ class Config:
     device: str = 'cuda:0'
     seed: int = 42
     data_path = 'data'
+    dtype: torch.dtype = torch.float32
     
     # pipeline control
     stage_start: str = 'vae_train'
