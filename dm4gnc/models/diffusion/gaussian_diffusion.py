@@ -207,7 +207,6 @@ class GaussianDiffusion(nn.Module):
         t = torch.ones([x_0.shape[0]], device = self.device, dtype=torch.int) * steps
 
         x_t, eps = self.q_sample(x_0, t)
-        x_t = x_t.unsqueeze(1)
         tlist = torch.ones([x_t.shape[0]], device = self.device) * steps
         _denom = max(1, torch.cuda.device_count())
         _disable_bar = (local_rank % _denom != 0)
