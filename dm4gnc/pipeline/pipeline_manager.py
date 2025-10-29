@@ -10,7 +10,7 @@ import os
 
 class PipelineManager:
     all_stages = ['vae_train', 'vae_encode', 'diff_train', 'diff_sample', 
-                     'vae_decode', 'filter_samples', 'classifier_train', 'classifier_test']
+                     'vae_decode', 'classifier_train', 'classifier_test']
     stage_classes = {
         'vae_train': VAETrainStage,
         'vae_encode': VAEEncodeStage,
@@ -108,8 +108,12 @@ class PipelineManager:
     def run(self):
         start_idx = self.all_stages.index(self.stage_start)
         end_idx = self.all_stages.index(self.stage_end)
+        stages_to_run = self.all_stages[start_idx:end_idx+1]
+        if 'diff_sample' in stages_to_run and self.config.diffusion.filter:
+            index = stages_to_run.index('diff_sample')
+            stages_to_run[index] = 'filter_samples'
+            
         self.stages = {}
-        for stage_name, stage_class in self.stage_classes.items():
-            if stage_name in self.all_stages[start_idx:end_idx+1]:
-                self.stages[stage_name] = stage_class(self.config, self.dataset)
-                self.stages[stage_name].run()
+        for stage_name in stages_to_run:
+            self.stages[stage_name] = self.stage_classes[stage_name](self.config, self.dataset)
+            self.stages[stage_name].run()

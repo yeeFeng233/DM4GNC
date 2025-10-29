@@ -39,6 +39,7 @@ def main():
 
     # run stages
     pipeline_manager = PipelineManager(config, dataset)
+    pipeline_manager.run()
 
 
 if __name__ == "__main__":

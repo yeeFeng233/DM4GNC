@@ -23,13 +23,15 @@ class VGAE(nn.Module):
         self.decoder.set_device(device)
 
     def encode(self, x, sample=True):
-        return self.encoder(x, sample=sample)
+        z = self.encoder(x, sample=sample)
+        self.mean, self.log_std = self.encoder.mean, self.encoder.log_std
+        return z
     
     def decode(self, z):
         return self.decoder(z)
     
     def forward(self, x, sample=True):
         z = self.encode(x, sample=sample)
-        self.mean, self.log_std = self.encoder.mean, self.encoder.log_std
+
         feat, A_pred = self.decode(z)
         return feat, A_pred

@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.sparse as sp
+import torch
 
 
 def preprocess_graph(adj):
@@ -102,3 +103,10 @@ def sparse_to_tuple(sparse_mx):
     values = sparse_mx.data
     shape = sparse_mx.shape
     return coords, values, shape
+
+def adj2edgeindex(adj):
+    edge_index = []
+    head, tail = torch.where(adj != 0)
+    edge_index.append(head)
+    edge_index.append(tail)
+    return torch.stack(edge_index)

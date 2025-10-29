@@ -68,6 +68,7 @@ class DiffSampleStage(BaseStage):
         checkpoint = {
             'stage': "diff_sample",
             'generated_samples': self.generated_samples,
+            'generated_labels': self.generated_labels,
         }
         torch.save(checkpoint, self.checkpoints_save_path)
         print(f"stage: diff_sample | Checkpoint saved: {self.checkpoints_save_path}")
@@ -101,7 +102,7 @@ class DiffSampleStage(BaseStage):
         print(f"generate samples for per class: {align_counts}")
         supplemented_labels = torch.cat([torch.full((int(n.item()),), i) for i, n in enumerate(align_counts) if n > 0]).to(self.device)
         supplemented_labels_one_hot = torch.nn.functional.one_hot(supplemented_labels, num_classes=self.config.num_classes).float().to(self.device)
-        
+        self.generated_labels = supplemented_labels
         generated_samples = []
         numloop = math.ceil(sample_sum / self.config.diffusion.genbatch)
 

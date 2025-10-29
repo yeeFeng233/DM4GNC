@@ -48,6 +48,8 @@ class DiffusionConfig:
     generate_ratio: float = 0.1
     dropout_condition: float = 0.1
     step: int = 10
+    filter: bool = False
+    filter_strategy: str = "topk"
 
 
 @dataclass
@@ -58,6 +60,7 @@ class ClassifierConfig:
     dropout: float = 0.5
     weight_decay: float = 0.0005
     epoch: int = 500
+    patience: int = 50
 
 
 @dataclass
@@ -66,7 +69,7 @@ class Config:
     algorithm: str = 'dm4gnc'
     task: str = 'node'
     dataset: str = 'Cora'
-    imb_level: str = 'mid'
+    imb_level: str = 'low'
     device: str = 'cuda:0'
     seed: int = 42
     data_path = 'data'
