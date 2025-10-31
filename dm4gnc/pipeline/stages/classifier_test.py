@@ -11,8 +11,8 @@ from ..base_stage import BaseStage
 from ...models import GCN_node_sparse
 
 class ClassifierTestStage(BaseStage):
-    def __init__(self, config, dataset):
-        super().__init__(config, dataset)
+    def __init__(self, config, dataset, logger=None):
+        super().__init__(config, dataset, logger=logger)
         self.train_index = torch.nonzero(dataset.train_mask,as_tuple=True)[0]
         self.val_index = torch.nonzero(dataset.val_mask,as_tuple=True)[0]
         self.test_index = torch.nonzero(dataset.test_mask,as_tuple=True)[0]
@@ -72,7 +72,15 @@ class ClassifierTestStage(BaseStage):
         macro_f1 = f1_score(test_labels, predictions, average='macro')
         bacc = balanced_accuracy_score(test_labels, predictions)
         auc_roc = roc_auc_score(test_labels, probabilities, multi_class='ovr', average='macro')
-        print("test_accuracy:", accuracy)
+        
+        print(f"Test Results: accuracy={accuracy:.4f}, macro_f1={macro_f1:.4f}, bacc={bacc:.4f}, auc_roc={auc_roc:.4f}")
+        
+        self.log_metrics({
+            'test_accuracy': accuracy,
+            'test_macro_f1': macro_f1,
+            'test_balanced_accuracy': bacc,
+            'test_auc_roc': auc_roc
+        })
 
         self._empty_memory()
 

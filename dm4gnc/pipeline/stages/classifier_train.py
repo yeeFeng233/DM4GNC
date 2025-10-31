@@ -12,8 +12,8 @@ from ...utils import adj2edgeindex
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score, roc_auc_score
 
 class ClassifierTrainStage(BaseStage):
-    def __init__(self, config, dataset):
-        super().__init__(config, dataset)
+    def __init__(self, config, dataset, logger=None):
+        super().__init__(config, dataset, logger=logger)
         self.train_index = torch.nonzero(dataset.train_mask,as_tuple=True)[0]
         self.val_index = torch.nonzero(dataset.val_mask,as_tuple=True)[0]
         self.test_index = torch.nonzero(dataset.test_mask,as_tuple=True)[0]
@@ -91,6 +91,15 @@ class ClassifierTrainStage(BaseStage):
             if epoch - self.best_epoch > self.config.classifier.patience:
                 print(f"Classifier training: early stopping at epoch {epoch}")
                 break
+
+        print(f"Classifier training finished: best_val_acc={self.best_acc:.4f} at epoch {self.best_epoch}")
+        
+        # 记录关键指标到logger
+        self.log_metrics({
+            'best_val_accuracy': self.best_acc,
+            'best_epoch': self.best_epoch,
+            'total_epochs': epoch
+        })
 
         self._save_checkpoints()
         self._empty_memory()

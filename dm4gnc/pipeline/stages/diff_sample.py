@@ -12,8 +12,8 @@ from ...models import MLPDenoiser, GaussianDiffusion, get_named_beta_schedule, G
 
 
 class DiffSampleStage(BaseStage):
-    def __init__(self, config, dataset):
-        super().__init__(config, dataset)
+    def __init__(self, config, dataset, logger=None):
+        super().__init__(config, dataset, logger=logger)
         self.train_index = torch.nonzero(dataset.train_mask, as_tuple=True)[0].to(self.device)
         self.val_index = torch.nonzero(dataset.val_mask, as_tuple=True)[0].to(self.device)
         self.test_index = torch.nonzero(dataset.test_mask, as_tuple=True)[0].to(self.device)
@@ -116,6 +116,13 @@ class DiffSampleStage(BaseStage):
             generated_samples.append(generated)
 
         self.generated_samples = torch.cat(generated_samples, dim=0)
+        
+        # 记录关键指标到logger
+        self.log_metrics({
+            'total_generated_samples': int(sample_sum.item()),
+            'generate_ratio': self.config.diffusion.generate_ratio,
+            'samples_per_class': align_counts.tolist()
+        })
 
         self._save_checkpoints()
         self._empty_memory()

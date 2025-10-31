@@ -10,8 +10,8 @@ from ..base_stage import BaseStage
 from ...models import VGAE
 
 class VAEDecodeStage(BaseStage):
-    def __init__(self, config, dataset):
-        super().__init__(config, dataset)
+    def __init__(self, config, dataset, logger=None):
+        super().__init__(config, dataset, logger=logger)
         self.adj = dataset.adj.to(self.device)
         self.features = dataset.x.to(self.device)
         self.edge_index = dataset.edge_index.to(self.device)

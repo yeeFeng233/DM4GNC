@@ -11,8 +11,8 @@ from ..base_stage import BaseStage
 from ...models import VGAE, MLPDenoiser, GaussianDiffusion, get_named_beta_schedule, GradualWarmupScheduler
 
 class FilterSamplesStage(BaseStage):
-    def __init__(self, config, dataset):
-        super().__init__(config, dataset)
+    def __init__(self, config, dataset, logger=None):
+        super().__init__(config, dataset, logger=logger)
 
         self.adj = dataset.adj.to(self.device)
         self.features = dataset.x.to(self.device)

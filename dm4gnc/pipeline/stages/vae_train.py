@@ -13,8 +13,8 @@ from ...evaluation import get_acc, get_scores
 from ...utils import preprocess_graph, mask_test_edges, sparse_to_tuple
 
 class VAETrainStage(BaseStage):
-    def __init__(self, config, dataset):
-        super().__init__(config, dataset)
+    def __init__(self, config, dataset, logger=None):
+        super().__init__(config, dataset, logger=logger)
 
         self.adj = dataset.adj.to(self.device)
         self.features = dataset.x.to(self.device)
@@ -165,6 +165,14 @@ class VAETrainStage(BaseStage):
                     break
         test_roc, test_ap = get_scores(test_edges, test_edges_false, A_pred, adj_orig)
         print("End of training!", "test_roc=", "{:.5f}".format(test_roc), "test_ap=", "{:.5f}".format(test_ap))
+        
+        # 记录关键指标到logger
+        self.log_metrics({
+            'best_val_roc': best_score / 2,  # 平均值
+            'best_epoch': best_epoch,
+            'test_roc': test_roc,
+            'test_ap': test_ap
+        })
 
         self._save_checkpoints()
         self._empty_memory()

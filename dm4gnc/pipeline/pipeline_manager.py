@@ -21,13 +21,14 @@ class PipelineManager:
         'classifier_train': ClassifierTrainStage,
         'classifier_test': ClassifierTestStage,
     }
-    def __init__(self, config, dataset):
+    def __init__(self, config, dataset, logger=None):
         self.config = config
         if dataset is not None:
             self.dataset = dataset
         self.device = torch.device(config.device)
         self.stage_start = config.stage_start
         self.stage_end = config.stage_end
+        self.logger = logger
 
         self._check_stages()
 
@@ -115,5 +116,10 @@ class PipelineManager:
             
         self.stages = {}
         for stage_name in stages_to_run:
-            self.stages[stage_name] = self.stage_classes[stage_name](self.config, self.dataset)
+            # 记录stage开始
+            if self.logger is not None:
+                self.logger.log_stage_start(stage_name)
+            
+            # 初始化stage并传递logger
+            self.stages[stage_name] = self.stage_classes[stage_name](self.config, self.dataset, logger=self.logger)
             self.stages[stage_name].run()

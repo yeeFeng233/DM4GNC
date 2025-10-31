@@ -10,6 +10,7 @@ sys.path.insert(0, str(project_root))
 from dm4gnc.config.config import Config
 from dm4gnc.config.parser import ConfigParser
 from dm4gnc.utils.random_seed import random_seed
+from dm4gnc.utils import ExperimentLogger
 from dm4gnc.data.dataset import Dataset
 from dm4gnc.pipeline.pipeline_manager import PipelineManager
 
@@ -26,6 +27,9 @@ def main():
     print(config)
 
     random_seed(config.seed)
+    
+    # 初始化logger
+    logger = ExperimentLogger(config)
 
     # load dataset
     dataset_builder = Dataset(
@@ -38,8 +42,11 @@ def main():
     print(dataset)
 
     # run stages
-    pipeline_manager = PipelineManager(config, dataset)
+    pipeline_manager = PipelineManager(config, dataset, logger=logger)
     pipeline_manager.run()
+    
+    # 完成日志记录
+    logger.finalize()
 
 
 if __name__ == "__main__":

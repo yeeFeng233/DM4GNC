@@ -11,8 +11,8 @@ from ..base_stage import BaseStage
 from ...models import MLPDenoiser, GaussianDiffusion, get_named_beta_schedule, GradualWarmupScheduler
 
 class DiffTrainStage(BaseStage):
-    def __init__(self, config, dataset):
-        super().__init__(config, dataset)
+    def __init__(self, config, dataset, logger=None):
+        super().__init__(config, dataset, logger=logger)
 
         self.train_index = torch.nonzero(dataset.train_mask, as_tuple=True)[0].to(self.device)
         self.val_index = torch.nonzero(dataset.val_mask, as_tuple=True)[0].to(self.device)
@@ -136,6 +136,16 @@ class DiffTrainStage(BaseStage):
                     if epc - self.best_epoch >= self.config.diffusion.patience:
                         print("Early stopping at epoch: ", epc)
                         break
+        
+        print(f"Diffusion training finished: best_val_loss={self.best_loss:.5f} at epoch {self.best_epoch}")
+        
+        # 记录关键指标到logger
+        self.log_metrics({
+            'best_val_loss': self.best_loss,
+            'best_epoch': self.best_epoch,
+            'total_epochs': epc
+        })
+        
         self._save_checkpoints()
         self._empty_memory()
 

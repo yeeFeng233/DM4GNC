@@ -11,8 +11,8 @@ from ...models import VGAE
 from ...utils import sparse_to_tuple
 
 class VAEEncodeStage(BaseStage):
-    def __init__(self, config, dataset):
-        super().__init__(config, dataset)
+    def __init__(self, config, dataset, logger=None):
+        super().__init__(config, dataset, logger=logger)
 
         self.adj = dataset.adj.to(self.device)
         self.features = dataset.x.to(self.device)
