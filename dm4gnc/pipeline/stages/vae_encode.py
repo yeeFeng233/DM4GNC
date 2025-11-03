@@ -41,14 +41,13 @@ class VAEEncodeStage(BaseStage):
         self.VGAE.load_state_dict(checkpoint['vae_stage_dict'])
         self.optimizer_vae.load_state_dict(checkpoint['optimizer_vae_stage_dict'])
         adj_norm = checkpoint['adj_norm']
-        self.features = checkpoint['features']
         self.VGAE.reset_adj(adj_norm)
 
     def _save_checkpoints(self):
         self._get_checkpoints_save_path()
         checkpoint = {
             'stage': "vae_encode",
-            'latents': self.z,
+            'latents': self.latents,
             'labels': self.labels
         }
         torch.save(checkpoint, self.checkpoints_save_path)
@@ -77,11 +76,19 @@ class VAEEncodeStage(BaseStage):
     def run(self):
         self._load_checkpoints()
 
+        features = self.features.cpu().detach().numpy()
+        features = sp.lil_matrix(features)
+        features = sparse_to_tuple(features.tocoo())
+        features = torch.sparse.FloatTensor(torch.LongTensor(features[0].T), 
+                            torch.FloatTensor(features[1]), 
+                            torch.Size(features[2])).to(self.device)
+
         self.VGAE.eval()
         with torch.no_grad():
-            self.z = self.VGAE.encode(self.features)
+            self.z = self.VGAE.encode(features)
 
-        _, self.pred_adj = self.VGAE.decode(self.z)
+        _, pred_adj = self.VGAE.decode(self.z)
+        self.latents = self.VGAE.mean
 
         self._save_checkpoints()
 

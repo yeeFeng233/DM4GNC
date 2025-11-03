@@ -3,7 +3,7 @@ dataset: Cora
 vae:
   name: "normal_vae"
   weight_decay: 0.0005 # 0.0005
-  lr: 0.01               # 0.001
+  lr: 0.005               # 0.001
   dropout: 0.5
 
   epoch: 1500          # number of training epochs of vae 3000
@@ -13,7 +13,6 @@ vae:
   coef_link: 1.0           # coefficient for reconstruction map loss
   neighbor_map_dim: 2708   # neighbor map dimension (number of dataset nodes)
   shuffle: true            # if true, shuffle data
-  neg_ratio: 20            # ratio of unlink edges in the training set
   patience: 100
 
   threshold: 0.9           # threshold for the decoded generated samples' adjacency
