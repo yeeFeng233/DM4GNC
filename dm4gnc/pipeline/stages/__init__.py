@@ -6,6 +6,7 @@ from .diff_train import DiffTrainStage
 from .diff_sample import DiffSampleStage
 from .classifier_train import ClassifierTrainStage
 from .classifier_test import ClassifierTestStage
+from .visualize_data import VisualizeDataStage
 
 __all__ = [
     'VAETrainStage',
@@ -16,5 +17,6 @@ __all__ = [
     'DiffSampleStage',
     'ClassifierTrainStage',
     'ClassifierTestStage',
+    'VisualizeDataStage',
 ]
 

@@ -8,6 +8,7 @@ import torch
 
 @dataclass
 class VAEConfig:
+    name: str = "normal_vae"
     weight_decay: float = 0.0005
     lr: float = 0.01
     dropout: float = 0.5
@@ -78,6 +79,7 @@ class Config:
     # pipeline control
     stage_start: str = 'vae_train'
     stage_end: str = 'classifier_test'
+    stage_to_visualize: str = 'vae_encode'
     
     # path configuration
     data_dir: str = 'data'

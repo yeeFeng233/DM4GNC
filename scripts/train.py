@@ -1,4 +1,7 @@
 #! /usr/bin/env python3
+"""
+This script is used to run the necessary stage and save the checkpoints.
+"""
 
 import argparse
 import sys
@@ -23,12 +26,11 @@ def main():
     config = ConfigParser.parse_args_and_merge_config(args)
 
     config.validate()
-
     print(config)
 
     random_seed(config.seed)
     
-    # 初始化logger
+
     logger = ExperimentLogger(config)
 
     # load dataset
@@ -45,7 +47,6 @@ def main():
     pipeline_manager = PipelineManager(config, dataset, logger=logger)
     pipeline_manager.run()
     
-    # 完成日志记录
     logger.finalize()
 
 

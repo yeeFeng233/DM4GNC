@@ -1,7 +1,7 @@
 from .stages import (VAETrainStage, VAEEncodeStage, VAEDecodeStage, 
             DiffTrainStage, DiffSampleStage, 
             ClassifierTrainStage, ClassifierTestStage,
-            FilterSamplesStage)
+            FilterSamplesStage, VisualizeDataStage)
 from ..models import (VGAE, GaussianDiffusion, MLPDenoiser, get_named_beta_schedule, 
                         GCN_node_sparse, GradualWarmupScheduler)
 
@@ -116,10 +116,14 @@ class PipelineManager:
             
         self.stages = {}
         for stage_name in stages_to_run:
-            # 记录stage开始
             if self.logger is not None:
                 self.logger.log_stage_start(stage_name)
             
-            # 初始化stage并传递logger
             self.stages[stage_name] = self.stage_classes[stage_name](self.config, self.dataset, logger=self.logger)
             self.stages[stage_name].run()
+
+    def visualize_data(self):
+        if self.logger is not None:
+            self.logger.log_stage_start("visualize_data")
+        visualize_data_stage = VisualizeDataStage(self.config, self.dataset, logger=self.logger)
+        visualize_data_stage.run()

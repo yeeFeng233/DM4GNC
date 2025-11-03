@@ -24,6 +24,9 @@ class ConfigParser:
                                    'diff_sample', 'vae_decode', 'filter_samples',
                                    'classifier_train', 'classifier_test'],
                            help='end stage')
+        parser.add_argument('--stage_to_visualize', type=str,
+                           choices=['vae_encode', 'diff_sample', 'vae_decode', 'filter_samples', 'classifier_test'],
+                           help='stage to visualize')
         
         # basic parameters
         parser.add_argument('--dataset', type=str,
