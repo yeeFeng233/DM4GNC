@@ -1,0 +1,53 @@
+
+dataset: PubMed
+vae:
+  name: "vae_class"
+  weight_decay: 0.0005 # 0.0005
+  lr: 0.01               # 0.001
+  dropout: 0.5
+
+  epoch: 1500          # number of training epochs of vae 3000
+  hidden_sizes: [256, 128]            # MLP hidden layer sizes
+  coef_kl: 1.0            # coefficient for KL loss
+  coef_feat: 1.0          # coefficient for reconstruction features loss
+  coef_link: 1.0           # coefficient for reconstruction map loss
+  neighbor_map_dim: 2708   # neighbor map dimension (number of dataset nodes)
+  shuffle: true            # if true, shuffle data
+  patience: 100
+
+  threshold: 0.9           # threshold for the decoded generated samples' adjacency
+  add_kl_loss: true        # add KL loss
+
+diffusion:
+  lr: 0.00001             # learning rate of diffusion
+  weight_decay: 0.0005 # weight decay of diffusion
+  epoch: 1500          # number of training epochs of diffusion 1500
+  batch_size: 512
+  patience: 500
+  multiplier: 2.5
+
+  T: 1000                 # number of diffusion timesteps   
+  cdim: 128               # dimension of conditional embedding  
+  hidden_dim: 1024        # dimension of hidden layer in MLPDenoiser
+  layers: 6               # number of layers in MLPDenoiser
+  droprate: 0.1           # dropout rate in ResBlocks  
+  schedule_name: "linear" # name of the schedule for the diffusion process
+
+  w: 2.5                  # CFG strength multiplier  
+  v: 0.3                  # posterior variance interpolation factor  
+
+  genbatch: 256           # batch size for sampling  
+  generate_ratio: 0.01     # the ratio of the number of generated samples
+  dropout_condition: 0.1  # dropout rate of the condition embedding
+  step: 10
+  filter: false            # if true, filter the generated samples, else, use simple generate
+  filter_strategy: "topk" # "topk" or "threshold", if filter, which strategy to use
+
+classifier:
+  n_layer: 2
+  hidden_dim: 128
+  lr: 0.01
+  dropout: 0.5
+  weight_decay: 0.0005
+  epoch: 500
+  patience: 50

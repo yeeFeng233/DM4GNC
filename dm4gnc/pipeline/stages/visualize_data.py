@@ -41,7 +41,7 @@ class VisualizeDataStage(BaseStage):
         pass
 
     def _load_vae_encode_checkpoints(self):
-        path = os.path.join(self.checkpoints_root, 'checkpoint_vae_encode.pth')
+        path = os.path.join(self.checkpoints_root, 'checkpoint_vae_encode', f'{self.config.vae.name}.pth')
         if not os.path.exists(path):
             raise FileNotFoundError(f"Checkpoint file not found: {path}")
         checkpoint = torch.load(path, weights_only=True, map_location=self.device)

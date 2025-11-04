@@ -41,6 +41,8 @@ class ConfigParser:
                            help='VAE learning rate')
         parser.add_argument('--vae_epoch', type=int,
                            help='VAE training epochs')
+        parser.add_argument('--vae_name', type=str,
+                           help='VAE name')
         
         # diffusion model parameters
         parser.add_argument('--diff_lr', type=float,
@@ -76,6 +78,8 @@ class ConfigParser:
             config.vae.lr = args.vae_lr
         if args.vae_epoch:
             config.vae.epoch = args.vae_epoch
+        if args.vae_name:
+            config.vae.name = args.vae_name
         
         if args.diff_lr:
             config.diffusion.lr = args.diff_lr

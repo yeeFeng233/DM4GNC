@@ -1,5 +1,5 @@
-from .vgae import VGAE
-from .encoder import GraphEncoder
-from .decoder import GraphDecoder
+from .vgae import VGAE, VGAE_class, VGAE_class_v2
+from .encoder import GraphEncoder, GraphEncoder_class
+from .decoder import GraphDecoder, GraphDecoder_class
 
-__all__ = ['VGAE', 'GraphEncoder', 'GraphDecoder']
+__all__ = ['VGAE', 'VGAE_class', 'VGAE_class_v2', 'GraphEncoder', 'GraphEncoder_class', 'GraphDecoder', 'GraphDecoder_class']

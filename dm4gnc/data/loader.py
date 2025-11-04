@@ -31,7 +31,8 @@ def load_node_data(data_name, data_path):
         features = normalize_features(features)
         features = torch.FloatTensor(np.array(features))
         
-    if data_name not in ['ogbn-arxiv','PubMed']:
+    # if data_name not in ['ogbn-arxiv','PubMed']:
+    if data_name not in ['ogbn-arxiv']:
         adj = index2dense(target_data.edge_index,target_data.num_nodes)
         adj = nx.adjacency_matrix(nx.from_numpy_array(adj))
         adj = adj + sp.eye(adj.shape[0])

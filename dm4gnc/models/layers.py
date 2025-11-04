@@ -59,6 +59,11 @@ class GraphConvSparse(nn.Module):
         self.activation = activation
 
     def forward(self, inputs):
+        # if inputs.is_sparse:
+        #     inputs = inputs.to_dense()
+        # if self.adj.is_sparse:
+        #     self.adj = self.adj.to_dense()
+        self.adj = self.adj.to(inputs.device)
         x = torch.mm(inputs, self.weight)
         x = torch.mm(self.adj, x)
         outputs = self.activation(x)

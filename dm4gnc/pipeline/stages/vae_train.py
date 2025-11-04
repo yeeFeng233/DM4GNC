@@ -8,7 +8,7 @@ import numpy as np
 import gc
 
 from ..base_stage import BaseStage
-from ...models import VGAE
+from ...models import VGAE, VGAE_class, VGAE_class_v2
 from ...evaluation import get_acc, get_scores
 from ...utils import preprocess_graph, mask_test_edges, sparse_to_tuple
 
@@ -19,23 +19,46 @@ class VAETrainStage(BaseStage):
         self.adj = dataset.adj.to(self.device)
         self.features = dataset.x.to(self.device)
         self.edge_index = dataset.edge_index.to(self.device)
-
-        self.VGAE = VGAE(feat_dim=self.config.feat_dim,
-                        hidden_dim=self.config.vae.hidden_sizes[0],
-                        latent_dim=self.config.vae.hidden_sizes[1],
-                        adj=self.adj).to(self.device)
-        self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
-                                            lr=self.config.vae.lr, 
-                                            weight_decay=self.config.vae.weight_decay)
+        self.labels = dataset.y.to(self.device)
+        self._init_model()
         
-        self.large_graph_threshold = 5000
+        self.large_graph_threshold = 20000
         self.neg_sample_ratio = 20
+
+    def _init_model(self):
+        if self.config.vae.name == "normal_vae":
+            self.VGAE = VGAE(feat_dim=self.config.feat_dim,
+                            hidden_dim=self.config.vae.hidden_sizes[0],
+                            latent_dim=self.config.vae.hidden_sizes[1],
+                            adj=None).to(self.device)
+            self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
+                                                lr=self.config.vae.lr)
+        elif self.config.vae.name == "vae_class":
+            self.VGAE = VGAE_class(feat_dim=self.config.feat_dim,
+                                hidden_dim=self.config.vae.hidden_sizes[0],
+                                latent_dim=self.config.vae.hidden_sizes[1],
+                                adj=None,
+                                num_classes = self.config.num_classes).to(self.device)
+            self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
+                                                lr=self.config.vae.lr)
+        elif self.config.vae.name == "vae_class_v2":
+            self.VGAE = VGAE_class_v2(feat_dim=self.config.feat_dim,
+                                hidden_dim=self.config.vae.hidden_sizes[0],
+                                latent_dim=self.config.vae.hidden_sizes[1],
+                                adj=None,
+                                num_classes = self.config.num_classes).to(self.device)
+            self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
+                                                lr=self.config.vae.lr)
+        else:
+            raise ValueError(f"Invalid vae name: {self.config.vae.name}")
 
     def _get_checkpoints_load_path(self):
         return None
     
     def _get_checkpoints_save_path(self):
-        self.checkpoints_save_path = os.path.join(self.checkpoints_root, 'checkpoint_vae_train.pth')
+        if not os.path.exists(os.path.join(self.checkpoints_root, "checkpoint_vae_train")):
+            os.makedirs(os.path.join(self.checkpoints_root, "checkpoint_vae_train"))
+        self.checkpoints_save_path = os.path.join(self.checkpoints_root, "checkpoint_vae_train", f'{self.config.vae.name}.pth')
         
     def _load_checkpoints(self):
         return None
@@ -157,6 +180,7 @@ class VAETrainStage(BaseStage):
         # 将adj转到CPU进行稀疏矩阵操作（scipy只支持CPU）
         adj_cpu = self.adj.cpu().detach().numpy()
         adj_cpu = sp.csr_array(adj_cpu)
+        labels_one_hot = F.one_hot(self.labels, num_classes=self.config.num_classes).float()
         
         # 去除自环
         adj_orig = adj_cpu.copy()
@@ -242,7 +266,14 @@ class VAETrainStage(BaseStage):
             self.optimizer_vae.zero_grad()
             
             # 前向传播
-            feat_pred, A_pred = self.VGAE(features)
+            if self.config.vae.name == "normal_vae":
+                feat_pred, A_pred = self.VGAE(features)
+            elif self.config.vae.name == "vae_class":
+                feat_pred, A_pred, class_pred = self.VGAE(features)
+            elif self.config.vae.name == "vae_class_v2":
+                feat_pred, A_pred, class_pred = self.VGAE(features)
+            else:
+                raise ValueError(f"Invalid vae name: {self.config.vae.name}")
             
             # 特征重构损失
             feat_loss = F.mse_loss(feat_pred[self.train_mask_vae], features.to_dense()[self.train_mask_vae])
@@ -266,6 +297,15 @@ class VAETrainStage(BaseStage):
                    self.config.vae.coef_feat * feat_loss + 
                    self.config.vae.coef_kl * kl_loss)
             
+            if self.config.vae.name == "vae_class":
+                class_loss = F.cross_entropy(class_pred[self.train_mask_vae], self.labels[self.train_mask_vae])
+                loss += class_loss
+            elif self.config.vae.name == "vae_class_v2":
+                class_loss = F.cross_entropy(class_pred[self.train_mask_vae], self.labels[self.train_mask_vae])
+                loss += class_loss
+            else:
+                class_loss = torch.tensor(0.0, device=self.device)
+            
             # 反向传播
             loss.backward()
             self.optimizer_vae.step()
@@ -281,15 +321,18 @@ class VAETrainStage(BaseStage):
                 val_roc, val_ap = get_scores(val_edges, val_edges_false, A_pred, adj_orig)
             
             # 打印日志
-            if is_large_graph:
-                print(f"VAE training: epoch {epoch} | train_loss: {loss.item():.5f} | "
-                      f"feat_loss: {feat_loss.item():.5f} | link_loss: {link_loss.item():.5f} | "
-                      f"kl_loss: {kl_loss.item():.5f} | val_roc: {val_roc:.5f} | val_ap: {val_ap:.5f}")
-            else:
-                print(f"VAE training: epoch {epoch} | train_loss: {loss.item():.5f} | "
-                      f"feat_loss: {feat_loss.item():.5f} | link_loss: {link_loss.item():.5f} | "
-                      f"kl_loss: {kl_loss.item():.5f} | train_acc: {train_acc:.5f} | "
-                      f"val_roc: {val_roc:.5f} | val_ap: {val_ap:.5f}")
+            if epoch%10 == 0:
+                if is_large_graph:
+                    print(f"VAE training: epoch {epoch} | train_loss: {loss.item():.5f} | "
+                        f"feat_loss: {feat_loss.item():.5f} | link_loss: {link_loss.item():.5f} | "
+                        f"class_loss: {class_loss.item():.5f} | "
+                        f"kl_loss: {kl_loss.item():.5f} | val_roc: {val_roc:.5f} | val_ap: {val_ap:.5f}")
+                else:
+                    print(f"VAE training: epoch {epoch} | train_loss: {loss.item():.5f} | "
+                        f"feat_loss: {feat_loss.item():.5f} | link_loss: {link_loss.item():.5f} | "
+                        f"class_loss: {class_loss.item():.5f} | "
+                        f"kl_loss: {kl_loss.item():.5f} | train_acc: {train_acc:.5f} | "
+                        f"val_roc: {val_roc:.5f} | val_ap: {val_ap:.5f}")
             
             # 早停机制
             if val_roc + val_ap > best_score:
