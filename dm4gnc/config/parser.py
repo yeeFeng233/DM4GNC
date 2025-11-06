@@ -25,7 +25,7 @@ class ConfigParser:
                                    'classifier_train', 'classifier_test'],
                            help='end stage')
         parser.add_argument('--stage_to_visualize', type=str,
-                           choices=['vae_encode', 'diff_sample', 'vae_decode', 'filter_samples', 'classifier_test'],
+                           choices=['vae_encode', 'diff_sample', 'vae_decode', 'filter_samples', 'neighbor_distribution'],
                            help='stage to visualize')
         
         # basic parameters
@@ -43,12 +43,22 @@ class ConfigParser:
                            help='VAE training epochs')
         parser.add_argument('--vae_name', type=str,
                            help='VAE name')
+        parser.add_argument('--vae_threshold', type=float,
+                           help='VAE threshold')
+                        
         
         # diffusion model parameters
         parser.add_argument('--diff_lr', type=float,
                            help='diffusion model learning rate')
         parser.add_argument('--diff_T', type=int,
                            help='diffusion steps')
+        parser.add_argument('--diff_generate_ratio', type=float,
+                           help='diffusion generate ratio')
+        parser.add_argument('--diff_filter', type=bool,
+                           help='diffusion filter')
+        parser.add_argument('--filter_strategy', type=str,
+                           choices=['topk', 'threshold', 'distance'],
+                           help='filter strategy for generated samples')
         
         # classifier parameters
         parser.add_argument('--cls_lr', type=float,
@@ -67,11 +77,13 @@ class ConfigParser:
             config.stage_start = args.stage_start
         if args.stage_end:
             config.stage_end = args.stage_end
+        if args.stage_to_visualize:
+            config.stage_to_visualize = args.stage_to_visualize
         if args.dataset:
             config.dataset = args.dataset
         if args.device:
             config.device = args.device
-        if args.seed:
+        if args.seed is not None:
             config.seed = args.seed
         
         if args.vae_lr:
@@ -80,12 +92,20 @@ class ConfigParser:
             config.vae.epoch = args.vae_epoch
         if args.vae_name:
             config.vae.name = args.vae_name
+        if args.vae_threshold:
+            config.vae.threshold = args.vae_threshold
         
         if args.diff_lr:
             config.diffusion.lr = args.diff_lr
         if args.diff_T:
             config.diffusion.T = args.diff_T
-        
+        if args.diff_generate_ratio is not None:
+            config.diffusion.generate_ratio = args.diff_generate_ratio
+        if args.diff_filter:
+            config.diffusion.filter = args.diff_filter
+        if args.filter_strategy:
+            config.diffusion.filter_strategy = args.filter_strategy
+
         if args.cls_lr:
             config.classifier.lr = args.cls_lr
         if args.cls_epoch:

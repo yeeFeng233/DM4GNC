@@ -41,7 +41,7 @@ diffusion:
   dropout_condition: 0.1  # dropout rate of the condition embedding
   step: 10
   filter: false            # if true, filter the generated samples, else, use simple generate
-  filter_strategy: "topk" # "topk" or "threshold", if filter, which strategy to use
+  filter_strategy: "topk" # "topk" or "threshold" or "distance", if filter, which strategy to use
 
 classifier:
   n_layer: 2

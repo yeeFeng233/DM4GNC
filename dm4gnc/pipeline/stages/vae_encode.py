@@ -22,40 +22,12 @@ class VAEEncodeStage(BaseStage):
         self._init_model()
 
 
-    def _init_model(self):
-        if self.config.vae.name == "normal_vae":
-            self.VGAE = VGAE(feat_dim=self.config.feat_dim,
-                            hidden_dim=self.config.vae.hidden_sizes[0],
-                            latent_dim=self.config.vae.hidden_sizes[1],
-                            adj=None).to(self.device)
-            self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
-                                                lr=self.config.vae.lr)
-        elif self.config.vae.name == "vae_class":
-            self.VGAE = VGAE_class(feat_dim=self.config.feat_dim,
-                                hidden_dim=self.config.vae.hidden_sizes[0],
-                                latent_dim=self.config.vae.hidden_sizes[1],
-                                adj=None,
-                                num_classes = self.config.num_classes).to(self.device)
-            self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
-                                                lr=self.config.vae.lr)
-        elif self.config.vae.name == "vae_class_v2":
-            self.VGAE = VGAE_class_v2(feat_dim=self.config.feat_dim,
-                                hidden_dim=self.config.vae.hidden_sizes[0],
-                                latent_dim=self.config.vae.hidden_sizes[1],
-                                adj=None,
-                                num_classes = self.config.num_classes).to(self.device)
-            self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
-                                                lr=self.config.vae.lr)
-        else:
-            raise ValueError(f"Invalid vae name: {self.config.vae.name}")
-
+    
     def _get_checkpoints_load_path(self):
-        self.checkpoints_load_path = os.path.join(self.checkpoints_root, 'checkpoint_vae_train', f'{self.config.vae.name}.pth')
+        self.checkpoints_load_path = os.path.join(self.checkpoints_root, 'checkpoint_vae_train.pth')
     
     def _get_checkpoints_save_path(self):
-        self.checkpoints_save_path = os.path.join(self.checkpoints_root, 'checkpoint_vae_encode', f'{self.config.vae.name}.pth')
-        if not os.path.exists(os.path.join(self.checkpoints_root, 'checkpoint_vae_encode')):
-            os.makedirs(os.path.join(self.checkpoints_root, 'checkpoint_vae_encode'))
+        self.checkpoints_save_path = os.path.join(self.checkpoints_root, 'checkpoint_vae_encode.pth')
 
     def _load_checkpoints(self):
         self._get_checkpoints_load_path()

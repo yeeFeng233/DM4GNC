@@ -34,12 +34,27 @@ class ClassifierTrainStage(BaseStage):
 
 
     def _get_checkpoints_load_path(self):
-        self.checkpoint_load_path = os.path.join(self.checkpoints_root, f"{self.config.diffusion.generate_ratio}", 'checkpoint_vae_decode.pth')
-    
+        if self.config.diffusion.filter:
+            self.checkpoint_load_path = os.path.join(self.checkpoints_root, f"{self.config.diffusion.generate_ratio}",f"{self.config.diffusion.filter_strategy}", 'checkpoint_vae_decode.pth')
+        else:
+            self.checkpoint_load_path = os.path.join(self.checkpoints_root, f"{self.config.diffusion.generate_ratio}", 'checkpoint_vae_decode.pth')
+       
     def _get_checkpoints_save_path(self):
-        self.checkpoint_save_path = os.path.join(self.checkpoints_root, 'checkpoint_classifier_train.pth')
+        if self.config.diffusion.filter:
+                self.checkpoint_save_dir = os.path.join(self.checkpoints_root, f"{self.config.diffusion.generate_ratio}",f"{self.config.diffusion.filter_strategy}")
+        else:
+            self.checkpoint_save_dir = os.path.join(self.checkpoints_root, f"{self.config.diffusion.generate_ratio}")
+        if not os.path.exists(self.checkpoint_save_dir):
+            os.makedirs(self.checkpoint_save_dir)
+        self.checkpoint_save_path = os.path.join(self.checkpoint_save_dir, 'checkpoint_classifier_train.pth')
         
     def _load_checkpoints(self):
+        if self.config.diffusion.generate_ratio == 0.0:
+            self.aug_adj = self.adj
+            self.aug_feats = self.features
+            self.aug_labels = self.labels
+            self.aug_train_index = self.train_index
+            return
         self._get_checkpoints_load_path()
         if not os.path.exists(self.checkpoint_load_path):
             raise FileNotFoundError(f"Checkpoint file not found: {self.checkpoint_load_path}")
@@ -70,11 +85,17 @@ class ClassifierTrainStage(BaseStage):
         self.aug_edge_index = adj2edgeindex(self.aug_adj)
         criterion = torch.nn.CrossEntropyLoss()
 
+        use_aug_index = False
+        if use_aug_index:
+            train_index = self.aug_train_index
+        else:
+            train_index = self.train_index
+
         for epoch in range(self.config.classifier.epoch):
             self.classifier.train()
             self.optimizer_classifier.zero_grad()
             out = self.classifier(self.aug_feats, self.aug_edge_index)
-            loss = criterion(out[self.aug_train_index], self.aug_labels[self.aug_train_index])
+            loss = criterion(out[train_index], self.aug_labels[train_index])
             loss.backward()
             self.optimizer_classifier.step()
 

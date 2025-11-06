@@ -15,7 +15,7 @@ class BaseStage(ABC):
         self.stage_name = self.stage_name.replace('train', 'train').replace('encode', 'encode').replace('decode', 'decode').replace('sample', 'sample').replace('test', 'test')
 
     def _check_checkpoints_root(self):
-        self.checkpoints_root = os.path.join(self.config.output_dir, 'checkpoints', self.config.dataset)
+        self.checkpoints_root = os.path.join(self.config.output_dir, 'checkpoints', self.config.dataset, f"{self.config.vae.name}")
         if not os.path.exists(self.checkpoints_root):
             os.makedirs(self.checkpoints_root)
     

@@ -56,9 +56,7 @@ class VAETrainStage(BaseStage):
         return None
     
     def _get_checkpoints_save_path(self):
-        if not os.path.exists(os.path.join(self.checkpoints_root, "checkpoint_vae_train")):
-            os.makedirs(os.path.join(self.checkpoints_root, "checkpoint_vae_train"))
-        self.checkpoints_save_path = os.path.join(self.checkpoints_root, "checkpoint_vae_train", f'{self.config.vae.name}.pth')
+        self.checkpoints_save_path = os.path.join(self.checkpoints_root, "checkpoint_vae_train.pth")
         
     def _load_checkpoints(self):
         return None

@@ -33,7 +33,10 @@ class ClassifierTestStage(BaseStage):
 
 
     def _get_checkpoints_load_path(self):
-        self.checkpoint_load_path = os.path.join(self.checkpoints_root, 'checkpoint_classifier_train.pth')
+        if self.config.diffusion.filter:
+                self.checkpoint_load_path = os.path.join(self.checkpoints_root, f"{self.config.diffusion.generate_ratio}",f"{self.config.diffusion.filter_strategy}", "checkpoint_classifier_train.pth")
+        else:
+            self.checkpoint_load_path = os.path.join(self.checkpoints_root, f"{self.config.diffusion.generate_ratio}", "checkpoint_classifier_train.pth")
     
     def _get_checkpoints_save_path(self):
         return None

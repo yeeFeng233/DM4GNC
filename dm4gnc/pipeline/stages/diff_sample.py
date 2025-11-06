@@ -116,8 +116,7 @@ class DiffSampleStage(BaseStage):
             generated_samples.append(generated)
 
         self.generated_samples = torch.cat(generated_samples, dim=0)
-        
-        # 记录关键指标到logger
+
         self.log_metrics({
             'total_generated_samples': int(sample_sum.item()),
             'generate_ratio': self.config.diffusion.generate_ratio,

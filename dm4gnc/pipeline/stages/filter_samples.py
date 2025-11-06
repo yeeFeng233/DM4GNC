@@ -8,7 +8,7 @@ import gc
 from tqdm import tqdm
 
 from ..base_stage import BaseStage
-from ...models import VGAE, MLPDenoiser, GaussianDiffusion, get_named_beta_schedule, GradualWarmupScheduler
+from ...models import VGAE, VGAE_class, VGAE_class_v2, MLPDenoiser, GaussianDiffusion, get_named_beta_schedule, GradualWarmupScheduler
 
 class FilterSamplesStage(BaseStage):
     def __init__(self, config, dataset, logger=None):
@@ -20,11 +20,37 @@ class FilterSamplesStage(BaseStage):
         self.labels = dataset.y.to(self.device)
         self.num_nodes = dataset.x.shape[0]
 
-        self.VGAE = VGAE(feat_dim=self.config.feat_dim,
-                        hidden_dim=self.config.vae.hidden_sizes[0],
-                        latent_dim=self.config.vae.hidden_sizes[1],
-                        adj=self.adj).to(self.device)
+        self._init_model()
 
+    def _init_model(self):
+        # VGAE
+        if self.config.vae.name == "normal_vae":
+            self.VGAE = VGAE(feat_dim=self.config.feat_dim,
+                            hidden_dim=self.config.vae.hidden_sizes[0],
+                            latent_dim=self.config.vae.hidden_sizes[1],
+                            adj=None).to(self.device)
+            self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
+                                                lr=self.config.vae.lr)
+        elif self.config.vae.name == "vae_class":
+            self.VGAE = VGAE_class(feat_dim=self.config.feat_dim,
+                                hidden_dim=self.config.vae.hidden_sizes[0],
+                                latent_dim=self.config.vae.hidden_sizes[1],
+                                adj=None,
+                                num_classes = self.config.num_classes).to(self.device)
+            self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
+                                                lr=self.config.vae.lr)
+        elif self.config.vae.name == "vae_class_v2":
+            self.VGAE = VGAE_class_v2(feat_dim=self.config.feat_dim,
+                                hidden_dim=self.config.vae.hidden_sizes[0],
+                                latent_dim=self.config.vae.hidden_sizes[1],
+                                adj=None,
+                                num_classes = self.config.num_classes).to(self.device)
+            self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
+                                                lr=self.config.vae.lr)
+        else:
+            raise ValueError(f"Invalid vae name: {self.config.vae.name}")
+
+        # Diffusion Model
         self.mlpdenoiser = MLPDenoiser(x_dim=self.config.vae.hidden_sizes[-1],
                                             emb_dim = self.config.diffusion.cdim,
                                             hidden_dim = self.config.diffusion.hidden_dim,
@@ -40,15 +66,13 @@ class FilterSamplesStage(BaseStage):
                                     device = self.device,
                                     config = self.config)
 
-
-
     def _get_checkpoints_load_path(self):
         self.checkpoints_load_path1 = os.path.join(self.checkpoints_root, 'checkpoint_vae_train.pth')
         self.checkpoints_load_path2 = os.path.join(self.checkpoints_root, 'checkpoint_diff_train.pth')
         self.checkpoints_load_path3 = os.path.join(self.checkpoints_root, 'checkpoint_vae_encode.pth')
     
     def _get_checkpoints_save_path(self):
-        save_dir = os.path.join(self.checkpoints_root, f"{self.config.diffusion.generate_ratio}")
+        save_dir = os.path.join(self.checkpoints_root, f"{self.config.diffusion.generate_ratio}", f"{self.config.diffusion.filter_strategy}")
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         self.checkpoints_save_path = os.path.join(save_dir, 'checkpoint_filter_samples.pth')
@@ -150,6 +174,7 @@ class FilterSamplesStage(BaseStage):
             filtered_labels.append(torch.ones(align_counts[cls],dtype = torch.int) * cls)
         
         return filtered_samples, filtered_labels
+
     def _filter_threshold(self):
         self.VGAE.eval()
         self.diffusion.model.eval()
@@ -223,6 +248,173 @@ class FilterSamplesStage(BaseStage):
             print(f"generate {align_counts[cls]} samples for class {cls} finished!",sup_samples.shape)
         return filtered_samples, filtered_labels
 
+    def _calculate_distance(self, samples, center, metric="euclidean"):
+        """Calculate distance between samples and center using specified metric."""
+        if metric == "euclidean":
+            return torch.norm(samples - center, dim=1, p=2)
+        elif metric == "manhattan":
+            return torch.norm(samples - center, dim=1, p=1)
+        elif metric == "cosine":
+            # Cosine distance = 1 - cosine similarity
+            samples_norm = torch.nn.functional.normalize(samples, p=2, dim=1)
+            center_norm = torch.nn.functional.normalize(center.unsqueeze(0), p=2, dim=1)
+            cosine_sim = torch.mm(samples_norm, center_norm.t()).squeeze()
+            return 1 - cosine_sim
+        else:
+            raise ValueError(f"Unknown distance metric: {metric}")
+    
+    def _filter_distance(self):
+        """
+        Filter samples based on distance to class center.
+        
+        Strategy:
+        1. Calculate the center (mean) of latents for each class
+        2. Calculate the average distance from samples to their class center as threshold
+        3. Generate samples and only keep those within the distance threshold
+        4. Repeat until target count is reached
+        """
+        self.VGAE.eval()
+        self.diffusion.model.eval()
+        
+
+        # Step 1: Calculate class centers and distance thresholds
+        print("\n" + "="*60)
+        print("Distance Filter - Calculating class centers and thresholds")
+        print("="*60)
+        
+        class_centers = []
+        distance_thresholds = []
+        distance_metric = "euclidean"
+        
+        for cls in range(self.config.num_classes):
+            class_index = torch.where(self.labels == cls)[0]
+            class_latents = self.latents[class_index]
+            
+            # Calculate class center (mean)
+            class_center = class_latents.mean(dim=0)
+            class_centers.append(class_center)
+            
+            # Calculate distances from each sample to center using specified metric
+            distances = self._calculate_distance(class_latents, class_center, distance_metric)
+            
+            # Use mean + 1.0*std as threshold (more permissive for generated samples)
+            mean_dist = distances.mean().item()
+            std_dist = distances.std().item()
+            threshold = mean_dist + 1.0 * std_dist  # Increased from mean_dist to be more permissive
+            distance_thresholds.append(threshold)
+            
+            print(f"  Class {cls}: samples={len(class_index)}, "
+                  f"threshold={threshold:.4f} (mean={mean_dist:.4f}, std={std_dist:.4f})")
+        
+        # Convert to tensors
+        class_centers = torch.stack(class_centers).to(self.device)  # [num_classes, latent_dim]
+        
+        # Step 2: Determine how many samples to generate for each class
+        counts = torch.bincount(self.labels)
+        align_counts = counts.max() - counts
+        align_counts = (align_counts * self.config.diffusion.generate_ratio).ceil().int()
+        
+        if self.config.diffusion.generate_ratio == -1:
+            align_counts = (counts * 1.0).ceil().int()
+        
+        print(f"\nTarget samples per class: {align_counts.tolist()}")
+        print("="*60 + "\n")
+        
+        # Step 3: Generate and filter samples
+        filtered_samples = []
+        filtered_labels = []
+        
+        for cls in range(self.config.num_classes):
+            target_count = align_counts[cls].item()
+            if target_count == 0:
+                continue
+            
+            print(f"Class {cls} - Target: {target_count} samples")
+            
+            # Batch size for each generation iteration
+            # Start with 3x target, but cap at reasonable limits
+            batch_size = max(50, min(300, target_count * 3))
+            cls_center = class_centers[cls]
+            threshold = distance_thresholds[cls]
+            
+            accepted_samples = []
+            total_generated = 0
+            total_accepted = 0
+            loop = 0
+            max_loops = 100  # Safety limit to prevent infinite loops
+            
+            while total_accepted < target_count and loop < max_loops:
+                # Generate candidate samples
+                cls_labels = torch.ones(batch_size, dtype=torch.long) * cls
+                cls_labels_one_hot = torch.nn.functional.one_hot(
+                    cls_labels, num_classes=self.config.num_classes
+                ).float().to(self.device)
+                
+                genshape = (batch_size, self.latents.shape[-1])
+                generated_candidates = self.diffusion.sample(genshape, cemb=cls_labels_one_hot)
+                total_generated += batch_size
+                
+                # Calculate distances to class center using specified metric
+                distances = self._calculate_distance(generated_candidates, cls_center, distance_metric)
+                
+                # Filter by threshold
+                valid_mask = distances <= threshold
+                valid_samples = generated_candidates[valid_mask]
+                
+                if len(valid_samples) > 0:
+                    accepted_samples.append(valid_samples)
+                    total_accepted += len(valid_samples)
+                
+                acceptance_rate = valid_mask.sum().item() / batch_size * 100
+                
+                # Debug info for first loop or when acceptance is 0
+                if loop == 0 or (acceptance_rate == 0 and loop < 3):
+                    dist_min, dist_max = distances.min().item(), distances.max().item()
+                    dist_mean = distances.mean().item()
+                    print(f"  Loop {loop+1}: dist range [{dist_min:.4f}, {dist_max:.4f}], "
+                          f"mean={dist_mean:.4f}, threshold={threshold:.4f}, "
+                          f"accepted={total_accepted}/{target_count} (rate: {acceptance_rate:.1f}%)")
+                # Regular output every 5 loops or when finished
+                elif loop % 5 == 0 or total_accepted >= target_count:
+                    print(f"  Loop {loop+1}: accepted {total_accepted}/{target_count} "
+                          f"(rate: {acceptance_rate:.1f}%, batch: {batch_size})")
+                
+                loop += 1
+                
+                # Adaptive batch size: if acceptance rate is too low, increase batch size
+                if acceptance_rate < 10 and batch_size < 500:
+                    batch_size = min(batch_size * 2, 500)
+            
+            # Concatenate and select exactly target_count samples
+            if accepted_samples:
+                all_accepted = torch.cat(accepted_samples, dim=0)
+                
+                if all_accepted.shape[0] > target_count:
+                    # If we have more than needed, select the closest ones using specified metric
+                    distances = self._calculate_distance(all_accepted, cls_center, distance_metric)
+                    _, indices = torch.topk(distances, k=target_count, largest=False)
+                    selected_samples = all_accepted[indices]
+                else:
+                    selected_samples = all_accepted
+                
+                filtered_samples.append(selected_samples)
+                filtered_labels.append(torch.ones(len(selected_samples), dtype=torch.int) * cls)
+                
+                # Simplified final summary
+                final_rate = all_accepted.shape[0] / total_generated * 100 if total_generated > 0 else 0
+                print(f"  ✓ Class {cls} done: {len(selected_samples)}/{target_count} samples "
+                      f"(generated: {total_generated}, overall rate: {final_rate:.1f}%)")
+            else:
+                print(f"  ✗ Warning: No samples accepted for class {cls}!")
+        
+        # Final summary
+        total_samples = sum([s.shape[0] for s in filtered_samples])
+        print("\n" + "="*60)
+        print(f"Distance Filter Complete: {total_samples} samples generated")
+        print("="*60)
+        
+        return filtered_samples, filtered_labels
+
     def run(self):
         """
         two strategy to select the samples:
@@ -237,6 +429,8 @@ class FilterSamplesStage(BaseStage):
             filtered_samples, filtered_labels = self._filter_topk()
         elif self.config.diffusion.filter_strategy == "threshold":
             filtered_samples, filtered_labels = self._filter_threshold()
+        elif self.config.diffusion.filter_strategy == "distance":
+            filtered_samples, filtered_labels = self._filter_distance()
         else:
             raise ValueError(f"Invalid filter strategy: {self.config.diffusion.filter_strategy}")
 

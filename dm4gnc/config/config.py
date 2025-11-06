@@ -51,6 +51,11 @@ class DiffusionConfig:
     step: int = 10
     filter: bool = False
     filter_strategy: str = "topk"
+    
+    # Distance filter strategy parameters
+    distance_threshold_factor: float = 0.5  # Factor for threshold: mean + factor * std
+    distance_metric: str = "euclidean"  # Distance metric: "euclidean", "manhattan", "cosine"
+    distance_batch_multiplier: int = 3  # Initial batch size multiplier (target * multiplier)
 
 
 @dataclass

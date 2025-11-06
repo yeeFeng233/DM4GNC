@@ -7,7 +7,7 @@ import os
 import gc
 
 from ..base_stage import BaseStage
-from ...models import VGAE
+from ...models import VGAE, VGAE_class, VGAE_class_v2
 
 class VAEDecodeStage(BaseStage):
     def __init__(self, config, dataset, logger=None):
@@ -17,26 +17,49 @@ class VAEDecodeStage(BaseStage):
         self.edge_index = dataset.edge_index.to(self.device)
         self.labels = dataset.y.to(self.device)
 
-        self.VGAE = VGAE(feat_dim=self.config.feat_dim,
-                        hidden_dim=self.config.vae.hidden_sizes[0],
-                        latent_dim=self.config.vae.hidden_sizes[1],
-                        adj=self.adj).to(self.device)
-        self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
-                                            lr=self.config.vae.lr, 
-                                            weight_decay=self.config.vae.weight_decay)
+        self._init_model()
         self.train_index = torch.nonzero(dataset.train_mask, as_tuple=True)[0].to(self.device)
         
+    def _init_model(self):
+        if self.config.vae.name == "normal_vae":
+            self.VGAE = VGAE(feat_dim=self.config.feat_dim,
+                            hidden_dim=self.config.vae.hidden_sizes[0],
+                            latent_dim=self.config.vae.hidden_sizes[1],
+                            adj=None).to(self.device)
+            self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
+                                                lr=self.config.vae.lr)
+        elif self.config.vae.name == "vae_class":
+            self.VGAE = VGAE_class(feat_dim=self.config.feat_dim,
+                                hidden_dim=self.config.vae.hidden_sizes[0],
+                                latent_dim=self.config.vae.hidden_sizes[1],
+                                adj=None,
+                                num_classes = self.config.num_classes).to(self.device)
+            self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
+                                                lr=self.config.vae.lr)
+        elif self.config.vae.name == "vae_class_v2":
+            self.VGAE = VGAE_class_v2(feat_dim=self.config.feat_dim,
+                                hidden_dim=self.config.vae.hidden_sizes[0],
+                                latent_dim=self.config.vae.hidden_sizes[1],
+                                adj=None,
+                                num_classes = self.config.num_classes).to(self.device)
+            self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
+                                                lr=self.config.vae.lr)
+        else:
+            raise ValueError(f"Invalid vae name: {self.config.vae.name}")
 
     def _get_checkpoints_load_path(self):
         self.checkpoints_load_path1 = os.path.join(self.checkpoints_root, 'checkpoint_vae_train.pth')
         self.checkpoints_load_path2 = os.path.join(self.checkpoints_root, 'checkpoint_vae_encode.pth')
         if self.config.diffusion.filter:
-            self.checkpoints_load_path3 = os.path.join(self.checkpoints_root, f"{self.config.diffusion.generate_ratio}", 'checkpoint_filter_samples.pth')
+            self.checkpoints_load_path3 = os.path.join(self.checkpoints_root, f"{self.config.diffusion.generate_ratio}",f"{self.config.diffusion.filter_strategy}", 'checkpoint_filter_samples.pth')
         else:
             self.checkpoints_load_path3 = os.path.join(self.checkpoints_root, f"{self.config.diffusion.generate_ratio}", 'checkpoint_diff_sample.pth')
         
     def _get_checkpoints_save_path(self):
-        save_dir = os.path.join(self.checkpoints_root, f"{self.config.diffusion.generate_ratio}")
+        if self.config.diffusion.filter:
+            save_dir = os.path.join(self.checkpoints_root, f"{self.config.diffusion.generate_ratio}",f"{self.config.diffusion.filter_strategy}")
+        else:
+            save_dir = os.path.join(self.checkpoints_root, f"{self.config.diffusion.generate_ratio}")
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         self.checkpoints_save_path = os.path.join(save_dir, 'checkpoint_vae_decode.pth')
@@ -103,9 +126,13 @@ class VAEDecodeStage(BaseStage):
         aug_labels = torch.cat([self.labels,self.generated_labels],dim=0)
 
         self.VGAE.eval()
-        pred_feats, pred_adj = self.VGAE.decode(aug_latents)
+        if self.config.vae.name != "vae_class":
+            pred_feats, pred_adj = self.VGAE.decode(aug_latents)
+        else:
+            pred_feats, pred_adj, _ = self.VGAE.decode(aug_latents)
         assert self.adj.device == pred_adj.device
         assert self.features.device == pred_feats.device
+        
         h,w = self.adj.shape
         pred_adj[:h,:w] = self.adj
         pred_feats[:h,:] = self.features
