@@ -85,7 +85,7 @@ class ClassifierTrainStage(BaseStage):
         self.aug_edge_index = adj2edgeindex(self.aug_adj)
         criterion = torch.nn.CrossEntropyLoss()
 
-        use_aug_index = False
+        use_aug_index = True
         if use_aug_index:
             train_index = self.aug_train_index
         else:

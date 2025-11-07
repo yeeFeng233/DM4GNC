@@ -29,14 +29,22 @@
 
 
 # filter_sample to classifier_test
-python scripts/train.py --config_path configs/dm4gnc/cora.yml \
---stage_start classifier_train \
---stage_end classifier_test \
---vae_name vae_class --diff_filter true \
---diff_generate_ratio 0.1 \
---vae_threshold 0.97 \
---filter_strategy "distance"
+# python scripts/train.py --config_path configs/dm4gnc/cora.yml \
+# --stage_start classifier_train \
+# --stage_end classifier_test \
+# --vae_name vae_class --diff_filter true \
+# --diff_generate_ratio 0 \
+# --vae_threshold 0.97 \
+# --filter_strategy "distance"
 # visualization neighbor distribution from stage filter_samples
 # python scripts/visualize_results.py --config_path configs/dm4gnc/cora.yml --stage_to_visualize neighbor_distribution \
 # --diff_generate_ratio -1 --vae_name vae_class --filter_strategy "distance" --diff_filter true
+
+# train vae_dec
+python scripts/train.py --config_path configs/dm4gnc/cora.yml \
+--stage_start vae_train \
+--stage_end vae_encode \
+--vae_name vae_dec
+# visualization
+python scripts/visualize_results.py --config_path configs/dm4gnc/cora.yml --stage_to_visualize vae_encode --vae_name vae_dec
 

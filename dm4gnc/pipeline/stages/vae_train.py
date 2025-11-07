@@ -8,7 +8,7 @@ import numpy as np
 import gc
 
 from ..base_stage import BaseStage
-from ...models import VGAE, VGAE_class, VGAE_class_v2
+from ...models import VGAE, VGAE_class, VGAE_class_v2, VGAE_DEC
 from ...evaluation import get_acc, get_scores
 from ...utils import preprocess_graph, mask_test_edges, sparse_to_tuple
 
@@ -47,6 +47,14 @@ class VAETrainStage(BaseStage):
                                 latent_dim=self.config.vae.hidden_sizes[1],
                                 adj=None,
                                 num_classes = self.config.num_classes).to(self.device)
+            self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
+                                                lr=self.config.vae.lr)
+        elif self.config.vae.name == "vae_dec":
+            self.VGAE = VGAE_DEC(feat_dim=self.config.feat_dim,
+                                hidden_dim=self.config.vae.hidden_sizes[0],
+                                latent_dim=self.config.vae.hidden_sizes[1],
+                                adj=None,
+                                n_clusters = self.config.num_classes).to(self.device)
             self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
                                                 lr=self.config.vae.lr)
         else:
@@ -257,7 +265,70 @@ class VAETrainStage(BaseStage):
         self.best_optimizer_vae_state = None
         best_epoch = 0
         best_score = 0
-        
+        if self.config.vae.name == "vae_dec":
+            # ============ VGAE_DEC的两阶段训练策略 ============
+            print("\n" + "="*50)
+            print("VGAE_DEC Training Strategy:")
+            print("  Phase 1: Pretrain VAE (reconstruction only)")
+            print("  Phase 2: Fine-tune with clustering loss")
+            print("="*50 + "\n")
+            
+            # 阶段1：预训练VAE（仅重构损失）
+            pretrain_epochs = min(200, self.config.vae.epoch // 3)
+            print(f"Phase 1: Pretraining for {pretrain_epochs} epochs...")
+            
+            for epoch in range(pretrain_epochs):
+                self.VGAE.train()
+                self.optimizer_vae.zero_grad()
+                
+                feat_pred, A_pred, z = self.VGAE(features)
+                
+                # 仅重构损失
+                feat_loss = F.mse_loss(feat_pred[self.train_mask_vae], features.to_dense()[self.train_mask_vae])
+                
+                if is_large_graph:
+                    neg_edges = self._sample_negative_edges_gpu(num_nodes, self.pos_edges, num_neg)
+                    link_loss = self._compute_loss_large_graph(A_pred, self.pos_edges, neg_edges)
+                else:
+                    link_loss = self._compute_loss_small_graph(A_pred, adj_label, weight_tensor, norm)
+                
+                kl_loss = -0.5 / A_pred.size(0) * (1 + 2 * self.VGAE.log_std - self.VGAE.mean**2 - torch.exp(self.VGAE.log_std)**2).sum(1).mean()
+                
+                loss = (self.config.vae.coef_link * link_loss + 
+                       self.config.vae.coef_feat * feat_loss + 
+                       self.config.vae.coef_kl * kl_loss)
+                
+                loss.backward()
+                self.optimizer_vae.step()
+                
+                if epoch % 10 == 0:
+                    with torch.no_grad():
+                        val_roc, val_ap = get_scores(val_edges, val_edges_false, A_pred, adj_orig)
+                    print(f"Pretrain epoch {epoch} | loss: {loss.item():.5f} | "
+                          f"val_roc: {val_roc:.5f} | val_ap: {val_ap:.5f}")
+            
+            # 使用预训练的隐变量初始化聚类中心
+            print("\nInitializing cluster centers with K-means...")
+            with torch.no_grad():
+                z = self.VGAE.encode(features)
+                y_pred = self.VGAE.init_cluster_centers(z)
+                
+                # 计算初始聚类质量
+                from sklearn.metrics import silhouette_score
+                silhouette = silhouette_score(z.cpu().numpy(), y_pred)
+                print(f"Initial silhouette score: {silhouette:.4f}")
+                
+                # 打印聚类分布
+                unique, counts = np.unique(y_pred, return_counts=True)
+                print(f"Initial cluster distribution: {dict(zip(unique, counts))}")
+            
+            print(f"\nPhase 2: Fine-tuning with clustering loss...")
+            print("="*50 + "\n")
+            
+            # 重置最佳模型追踪
+            best_epoch = pretrain_epochs
+            best_score = 0
+
         # ============ 训练循环 ============
         for epoch in range(self.config.vae.epoch):
             self.VGAE.train()
@@ -270,6 +341,8 @@ class VAETrainStage(BaseStage):
                 feat_pred, A_pred, class_pred = self.VGAE(features)
             elif self.config.vae.name == "vae_class_v2":
                 feat_pred, A_pred, class_pred = self.VGAE(features)
+            elif self.config.vae.name == "vae_dec":
+                feat_pred, A_pred, z = self.VGAE(features)
             else:
                 raise ValueError(f"Invalid vae name: {self.config.vae.name}")
             
@@ -295,14 +368,37 @@ class VAETrainStage(BaseStage):
                    self.config.vae.coef_feat * feat_loss + 
                    self.config.vae.coef_kl * kl_loss)
             
-            if self.config.vae.name == "vae_class":
+            if self.config.vae.name == "vae_class" or self.config.vae.name == "vae_class_v2":
                 class_loss = F.cross_entropy(class_pred[self.train_mask_vae], self.labels[self.train_mask_vae])
                 loss += class_loss
-            elif self.config.vae.name == "vae_class_v2":
-                class_loss = F.cross_entropy(class_pred[self.train_mask_vae], self.labels[self.train_mask_vae])
-                loss += class_loss
-            else:
-                class_loss = torch.tensor(0.0, device=self.device)
+            elif self.config.vae.name == "vae_dec":
+                # 动态聚类权重调整：从0.1逐渐增加到10.0
+                total_epochs = self.config.vae.epoch
+                warmup_epochs = min(20, total_epochs // 5)
+                
+                if epoch < warmup_epochs:
+                    # Warm-up阶段：线性增加权重
+                    cluster_weight = 0.1 + (5.0 - 0.1) * (epoch / warmup_epochs)
+                else:
+                    # 稳定阶段：使用较大权重
+                    cluster_weight = 5.0 + 5.0 * ((epoch - warmup_epochs) / (total_epochs - warmup_epochs))
+                
+                cluster_loss, q = self.VGAE.clustering_loss(z)
+                loss += cluster_loss * cluster_weight
+                
+                # 聚类质量监控
+                if epoch % 10 == 0:
+                    with torch.no_grad():
+                        # 计算聚类分配的置信度
+                        max_probs, pred_labels = q.max(dim=1)
+                        avg_confidence = max_probs.mean().item()
+                        
+                        # 计算聚类熵（越小越好）
+                        cluster_entropy = -(q * (q + 1e-10).log()).sum(dim=1).mean().item()
+                        
+                        # 聚类分布
+                        cluster_counts = pred_labels.bincount(minlength=self.VGAE.n_clusters)
+
             
             # 反向传播
             loss.backward()
@@ -310,17 +406,25 @@ class VAETrainStage(BaseStage):
             
             # 验证（使用采样的验证集）
             with torch.no_grad():
-                if is_large_graph:
-                    # 大图模式：只在采样边上计算准确率
-                    train_acc = 0.0  # 大图模式下跳过全矩阵准确率计算
-                else:
-                    train_acc = get_acc(A_pred, adj_label)
+                # if is_large_graph:
+                #     # 大图模式：只在采样边上计算准确率
+                #     train_acc = 0.0  # 大图模式下跳过全矩阵准确率计算
+                # else:
+                #     train_acc = get_acc(A_pred, adj_label)
                 
                 val_roc, val_ap = get_scores(val_edges, val_edges_false, A_pred, adj_orig)
             
             # 打印日志
             if epoch%10 == 0:
-                if is_large_graph:
+                # if is_large_graph:
+                if self.config.vae.name == "vae_dec":
+                    print(f"VAE training: epoch {epoch} | train_loss: {loss.item():.5f} | "
+                        f"feat_loss: {feat_loss.item():.5f} | link_loss: {link_loss.item():.5f} | "
+                        f"cluster_loss: {cluster_loss.item():.5f} (w:{cluster_weight:.2f}) | "
+                        f"kl_loss: {kl_loss.item():.5f} | val_roc: {val_roc:.5f} | val_ap: {val_ap:.5f}")
+                    print(f"           Cluster quality: confidence={avg_confidence:.4f} | "
+                        f"entropy={cluster_entropy:.4f} | dist={cluster_counts.tolist()}")
+                elif self.config.vae.name == "vae_class" or self.config.vae.name == "vae_class_v2":
                     print(f"VAE training: epoch {epoch} | train_loss: {loss.item():.5f} | "
                         f"feat_loss: {feat_loss.item():.5f} | link_loss: {link_loss.item():.5f} | "
                         f"class_loss: {class_loss.item():.5f} | "
@@ -328,9 +432,13 @@ class VAETrainStage(BaseStage):
                 else:
                     print(f"VAE training: epoch {epoch} | train_loss: {loss.item():.5f} | "
                         f"feat_loss: {feat_loss.item():.5f} | link_loss: {link_loss.item():.5f} | "
-                        f"class_loss: {class_loss.item():.5f} | "
-                        f"kl_loss: {kl_loss.item():.5f} | train_acc: {train_acc:.5f} | "
-                        f"val_roc: {val_roc:.5f} | val_ap: {val_ap:.5f}")
+                        f"kl_loss: {kl_loss.item():.5f} | val_roc: {val_roc:.5f} | val_ap: {val_ap:.5f}")
+                # else:
+                #     print(f"VAE training: epoch {epoch} | train_loss: {loss.item():.5f} | "
+                #         f"feat_loss: {feat_loss.item():.5f} | link_loss: {link_loss.item():.5f} | "
+                #         f"class_loss: {class_loss.item():.5f} | "
+                #         f"kl_loss: {kl_loss.item():.5f} | train_acc: {train_acc:.5f} | "
+                #         f"val_roc: {val_roc:.5f} | val_ap: {val_ap:.5f}")
             
             # 早停机制
             if val_roc + val_ap > best_score:

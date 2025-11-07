@@ -7,7 +7,7 @@ import os
 import gc
 
 from ..base_stage import BaseStage
-from ...models import VGAE, VGAE_class, VGAE_class_v2
+from ...models import VGAE, VGAE_class, VGAE_class_v2, VGAE_DEC
 from ...utils import sparse_to_tuple
 
 class VAEEncodeStage(BaseStage):
@@ -21,6 +21,40 @@ class VAEEncodeStage(BaseStage):
 
         self._init_model()
 
+    def _init_model(self):
+        if self.config.vae.name == "normal_vae":
+            self.VGAE = VGAE(feat_dim=self.config.feat_dim,
+                            hidden_dim=self.config.vae.hidden_sizes[0],
+                            latent_dim=self.config.vae.hidden_sizes[1],
+                            adj=None).to(self.device)
+            self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
+                                                lr=self.config.vae.lr)
+        elif self.config.vae.name == "vae_class":
+            self.VGAE = VGAE_class(feat_dim=self.config.feat_dim,
+                                hidden_dim=self.config.vae.hidden_sizes[0],
+                                latent_dim=self.config.vae.hidden_sizes[1],
+                                adj=None,
+                                num_classes = self.config.num_classes).to(self.device)
+            self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
+                                                lr=self.config.vae.lr)
+        elif self.config.vae.name == "vae_class_v2":
+            self.VGAE = VGAE_class_v2(feat_dim=self.config.feat_dim,
+                                hidden_dim=self.config.vae.hidden_sizes[0],
+                                latent_dim=self.config.vae.hidden_sizes[1],
+                                adj=None,
+                                num_classes = self.config.num_classes).to(self.device)
+            self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
+                                                lr=self.config.vae.lr)
+        elif self.config.vae.name == "vae_dec":
+            self.VGAE = VGAE_DEC(feat_dim=self.config.feat_dim,
+                                hidden_dim=self.config.vae.hidden_sizes[0],
+                                latent_dim=self.config.vae.hidden_sizes[1],
+                                adj=None,
+                                n_clusters = self.config.num_classes).to(self.device)
+            self.optimizer_vae = torch.optim.Adam(self.VGAE.parameters(), 
+                                                lr=self.config.vae.lr)
+        else:
+            raise ValueError(f"Invalid vae name: {self.config.vae.name}")
 
     
     def _get_checkpoints_load_path(self):
@@ -87,6 +121,8 @@ class VAEEncodeStage(BaseStage):
                 self.z = self.VGAE.encode(features)
             elif self.config.vae.name == "vae_class_v2":
                 self.z, class_pred = self.VGAE.encode(features)
+            elif self.config.vae.name == "vae_dec":
+                self.z = self.VGAE.encode(features)
             else:
                 raise ValueError(f"Invalid vae name: {self.config.vae.name}")
 
@@ -95,6 +131,8 @@ class VAEEncodeStage(BaseStage):
         elif self.config.vae.name == "vae_class":
             feat_pred, A_pred, class_pred = self.VGAE.decode(self.z)
         elif self.config.vae.name == "vae_class_v2":
+            feat_pred, A_pred = self.VGAE.decode(self.z)
+        elif self.config.vae.name == "vae_dec":
             feat_pred, A_pred = self.VGAE.decode(self.z)
         else:
             raise ValueError(f"Invalid vae name: {self.config.vae.name}")

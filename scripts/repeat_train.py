@@ -38,8 +38,8 @@ def define_hyperparameter_sets():
     thresholds = [ i/100.0+0.90 for i in range(1,10,1)]
     filters = [True]
     filter_strategies = ["distance"]
+    vae_names = ["normal_vae","vae_class","vae_class_v2"]
     hyperparam_sets = []
-    vae_names = ["vae_class"]
     for generate_ratio in generate_ratios:
         for threshold in thresholds:
             for filter in filters:
