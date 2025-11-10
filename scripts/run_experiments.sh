@@ -40,11 +40,11 @@
 # python scripts/visualize_results.py --config_path configs/dm4gnc/cora.yml --stage_to_visualize neighbor_distribution \
 # --diff_generate_ratio -1 --vae_name vae_class --filter_strategy "distance" --diff_filter true
 
-# train vae_dec
-python scripts/train.py --config_path configs/dm4gnc/cora.yml \
+# train vae in Computers
+python scripts/train.py --config_path configs/dm4gnc/computers.yml \
 --stage_start vae_train \
 --stage_end vae_encode \
 --vae_name vae_dec
 # visualization
-python scripts/visualize_results.py --config_path configs/dm4gnc/cora.yml --stage_to_visualize vae_encode --vae_name vae_dec
+# python scripts/visualize_results.py --config_path configs/dm4gnc/computers.yml --stage_to_visualize vae_encode --vae_name normal_vae
 

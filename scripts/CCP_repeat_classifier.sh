@@ -51,13 +51,13 @@ for dataset in "${!DATASETS[@]}"; do
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] [${dataset^}] 开始重复训练实验..."
         
         if ! python scripts/repeat_train.py \
-            --config_path "configs/dm4gnc/${dataset}.yml" \
-            --device "${device}" \
+                    --config_path "configs/dm4gnc/${dataset}.yml" \
+                    --device "${device}" \
             --seed "${SEED}"; then
             echo "[ERROR] [${dataset^}] 重复训练实验失败"
-            exit 1
-        fi
-        
+                    exit 1
+                fi
+                
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] [${dataset^}] 所有实验完成"
     } &
     

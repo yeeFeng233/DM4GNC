@@ -23,8 +23,11 @@ class VAEConfig:
     neg_ratio: int = 20
     patience: int = 100
     threshold: float = 0.9
-
     add_kl_loss: bool = True
+
+    use_amp: bool = True
+    val_interval: int = 5
+    neg_ratio: int = 5
 
 
 @dataclass

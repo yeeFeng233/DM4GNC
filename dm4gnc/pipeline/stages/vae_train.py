@@ -6,11 +6,12 @@ import scipy.sparse as sp
 import os
 import numpy as np
 import gc
+from torch.amp import GradScaler, autocast
 
 from ..base_stage import BaseStage
 from ...models import VGAE, VGAE_class, VGAE_class_v2, VGAE_DEC
 from ...evaluation import get_acc, get_scores
-from ...utils import preprocess_graph, mask_test_edges, sparse_to_tuple
+from ...utils import preprocess_graph, mask_test_edges, mask_test_edges_fast, sparse_to_tuple
 
 class VAETrainStage(BaseStage):
     def __init__(self, config, dataset, logger=None):
@@ -22,8 +23,19 @@ class VAETrainStage(BaseStage):
         self.labels = dataset.y.to(self.device)
         self._init_model()
         
-        self.large_graph_threshold = 20000
-        self.neg_sample_ratio = 20
+        self.large_graph_threshold = 10000
+        self.neg_sample_ratio = 5
+        
+        # Performance optimization flags
+        self.use_amp = getattr(config.vae, 'use_amp', True)  # Automatic Mixed Precision
+        self.val_interval = getattr(config.vae, 'val_interval', 5)  # Validate every N epochs
+        
+        # Initialize GradScaler for mixed precision training
+        if self.use_amp:
+            self.scaler = GradScaler(device='cuda')
+            print(f"[Optimization] Mixed precision training (AMP) enabled")
+        else:
+            self.scaler = None
 
     def _init_model(self):
         if self.config.vae.name == "normal_vae":
@@ -60,6 +72,27 @@ class VAETrainStage(BaseStage):
         else:
             raise ValueError(f"Invalid vae name: {self.config.vae.name}")
 
+    def compute_kl_loss_stable(self, mean, log_std):
+        """
+        Numerically stable KL divergence computation
+        KL(N(μ,σ²)||N(0,1)) = 0.5 * sum(μ² + σ² - 1 - log(σ²))
+        """
+        # Clamp log_std to prevent exp explosion
+        log_std_clamped = torch.clamp(log_std, min=-10, max=2)
+        
+        # Compute KL divergence
+        kl_per_dim = 0.5 * (
+            mean.pow(2) + 
+            torch.exp(2 * log_std_clamped) - 
+            1 - 
+            2 * log_std_clamped
+        )
+        
+        # Mean over all dimensions
+        kl_loss = torch.mean(kl_per_dim)
+        
+        return kl_loss
+    
     def _get_checkpoints_load_path(self):
         return None
     
@@ -114,48 +147,57 @@ class VAETrainStage(BaseStage):
 
     def _sample_negative_edges_gpu(self, num_nodes, pos_edges, num_neg_samples):
         """
-        在GPU上采样负边
-        Args:
-            num_nodes: 节点数量
-            pos_edges: 正边张量 [num_pos, 2]
-            num_neg_samples: 需要采样的负边数量
-        Returns:
-            neg_edges: 负边张量 [num_neg_samples, 2]
+        在GPU上高效采样负边，避免CPU-GPU传输
+        使用向量化操作提高效率
         """
-        # 将正边转换为集合（在GPU上进行哈希）
-        pos_edge_set = set()
-        pos_edges_cpu = pos_edges.cpu().numpy()
-        for i in range(pos_edges_cpu.shape[0]):
-            e = tuple(pos_edges_cpu[i])
-            pos_edge_set.add(e)
-            pos_edge_set.add((e[1], e[0]))  # 无向图
+        # 构建正边的快速查找结构（使用GPU tensor）
+        # 将正边转换为唯一的整数索引: idx = src * num_nodes + dst
+        pos_edge_indices = pos_edges[:, 0] * num_nodes + pos_edges[:, 1]
+        pos_edge_set_tensor = torch.zeros(num_nodes * num_nodes, dtype=torch.bool, device=self.device)
+        pos_edge_set_tensor[pos_edge_indices] = True
         
         neg_edges = []
-        max_attempts = num_neg_samples * 100  # 防止无限循环
         attempts = 0
+        max_attempts = num_neg_samples * 5
         
-        # 批量采样提高效率
         while len(neg_edges) < num_neg_samples and attempts < max_attempts:
-            # 一次采样多个候选边
-            batch_size = min(num_neg_samples * 2, num_neg_samples - len(neg_edges) + 100)
+            # 批量采样（提高效率）
+            batch_size = min(num_neg_samples * 3, num_neg_samples - len(neg_edges) + 1000)
             src = torch.randint(0, num_nodes, (batch_size,), device=self.device)
             dst = torch.randint(0, num_nodes, (batch_size,), device=self.device)
             
-            # 移到CPU进行集合检查（更快）
-            src_cpu = src.cpu().numpy()
-            dst_cpu = dst.cpu().numpy()
+            # 向量化过滤：去除自环和正边
+            valid_mask = (src != dst)  # 不是自环
+            edge_indices = src * num_nodes + dst
+            valid_mask &= ~pos_edge_set_tensor[edge_indices]  # 不是正边
             
-            for i in range(batch_size):
-                if len(neg_edges) >= num_neg_samples:
-                    break
-                s, d = int(src_cpu[i]), int(dst_cpu[i])
-                if s != d and (s, d) not in pos_edge_set:
-                    neg_edges.append([s, d])
-                    pos_edge_set.add((s, d))  # 避免重复采样
+            # 提取有效的负边
+            valid_src = src[valid_mask]
+            valid_dst = dst[valid_mask]
+            
+            # 添加到结果（转换为列表避免重复）
+            if len(valid_src) > 0:
+                new_edges = torch.stack([valid_src, valid_dst], dim=1)
+                neg_edges.append(new_edges)
+                
+                # 标记已采样的边，避免重复
+                new_indices = edge_indices[valid_mask]
+                pos_edge_set_tensor[new_indices] = True
             
             attempts += batch_size
         
-        return torch.tensor(neg_edges, dtype=torch.long, device=self.device)
+        if len(neg_edges) == 0:
+            # Fallback: 如果没有采样到任何边
+            return torch.empty((0, 2), dtype=torch.long, device=self.device)
+        
+        # 合并所有批次的结果
+        neg_edges = torch.cat(neg_edges, dim=0)
+        
+        # 截断到所需数量
+        if len(neg_edges) > num_neg_samples:
+            neg_edges = neg_edges[:num_neg_samples]
+        
+        return neg_edges
 
     def _compute_loss_small_graph(self, A_pred, adj_label, weight_tensor, norm):
         link_loss = norm * F.binary_cross_entropy(A_pred.view(-1), adj_label.to_dense().view(-1), weight=weight_tensor)
@@ -173,72 +215,66 @@ class VAETrainStage(BaseStage):
         return link_loss
 
     def run(self):
+        import time
+        start_time = time.time()
+        
         self._load_checkpoints()
         
         num_nodes = self.adj.shape[0]
         is_large_graph = num_nodes > self.large_graph_threshold
         
-        print(f"Graph size: {num_nodes} nodes")
+        print(f"\n{'='*60}")
+        print(f"VAE Training Preparation")
+        print(f"{'='*60}")
+        print(f"Graph size: {num_nodes} nodes, {self.adj.sum().item()//2:.0f} edges")
         print(f"Mode: {'LARGE GRAPH (Negative Sampling)' if is_large_graph else 'SMALL GRAPH (Full Matrix)'}")
+        print(f"Device: {self.device}")
+        print(f"{'='*60}\n")
         
-        # ============ 数据预处理（尽量在GPU上进行） ============
         
-        # 将adj转到CPU进行稀疏矩阵操作（scipy只支持CPU）
+
         adj_cpu = self.adj.cpu().detach().numpy()
         adj_cpu = sp.csr_array(adj_cpu)
         labels_one_hot = F.one_hot(self.labels, num_classes=self.config.num_classes).float()
-        
-        # 去除自环
+
         adj_orig = adj_cpu.copy()
         adj_orig = adj_orig - sp.dia_matrix((adj_orig.diagonal()[np.newaxis, :], [0]), shape=adj_orig.shape)
         adj_orig.eliminate_zeros()
+
         
         # 划分训练/验证/测试边
-        adj_train, train_edges, val_edges, val_edges_false, test_edges, test_edges_false = mask_test_edges(adj_orig, val_ratio=0.1)
-        
-        # 归一化邻接矩阵
+        # Use fast version for large graphs
+        adj_train, train_edges, val_edges, val_edges_false, test_edges, test_edges_false = mask_test_edges_fast(
+            adj_orig, val_ratio=0.05, test_ratio=0.1, seed=self.config.seed)
         adj_norm = preprocess_graph(adj_train)
-        
-        # 转换为PyTorch稀疏张量（GPU）
         self.adj_norm = torch.sparse.FloatTensor(
             torch.LongTensor(adj_norm[0].T), 
             torch.FloatTensor(adj_norm[1]), 
             torch.Size(adj_norm[2])
         ).to(self.device)
         
-        # 处理特征矩阵
-        features = self.features.cpu().detach().numpy()
-        features = sp.lil_matrix(features)
-        features = sparse_to_tuple(features.tocoo())
-        features = torch.sparse.FloatTensor(torch.LongTensor(features[0].T), 
-                                    torch.FloatTensor(features[1]), 
-                                    torch.Size(features[2])).to(self.device)
+        if self.features.is_sparse:
+            features = self.features.coalesce().to(self.device)
+        else:
+            features = self.features.to_sparse().coalesce().to(self.device)
+        features_dense = features.to_dense()
 
 
-        # 特征重构的训练/验证划分
         total_size = num_nodes
         train_size = int(total_size * 0.8)
         index = torch.randperm(total_size)
         self.train_mask_vae = index[:train_size].to(self.device)
         self.val_mask_vae = index[train_size:].to(self.device)
-        
-        # ============ 根据图大小选择训练策略 ============
-        
+ 
         if is_large_graph:
-            # 大图模式：负采样
-            # 提取正边并转为GPU张量
+
             pos_edges_np = np.array(adj_train.nonzero()).T
             self.pos_edges = torch.tensor(pos_edges_np, dtype=torch.long, device=self.device)
-            
-            # 预采样负边（每个epoch重新采样）
             num_pos = self.pos_edges.shape[0] // 2  # 无向图，除以2
             num_neg = num_pos * self.neg_sample_ratio
             
             print(f"Positive edges: {num_pos}, Negative samples per epoch: {num_neg}")
-            
         else:
-            # 小图模式：全矩阵
-            # 构建标签邻接矩阵
             adj_label = adj_train + sp.eye(adj_train.shape[0])
             adj_label_tuple = sparse_to_tuple(adj_label)
             adj_label = torch.sparse.FloatTensor(
@@ -247,7 +283,6 @@ class VAETrainStage(BaseStage):
                 torch.Size(adj_label_tuple[2])
             ).to(self.device)
             
-            # 计算权重
             pos_weight = float(adj_train.shape[0] * adj_train.shape[0] - adj_train.sum()) / adj_train.sum()
             norm = adj_train.shape[0] * adj_train.shape[0] / float((adj_train.shape[0] * adj_train.shape[0] - adj_train.sum()) * 2)
             
@@ -256,11 +291,9 @@ class VAETrainStage(BaseStage):
             weight_tensor[weight_mask] = pos_weight
             
             print(f"Pos weight: {pos_weight:.2f}, Norm: {norm:.4f}")
-        
-        # 更新VGAE的邻接矩阵
+
         self.VGAE.reset_adj(self.adj_norm)
         
-        # 最佳模型追踪
         self.best_vae_state = None
         self.best_optimizer_vae_state = None
         best_epoch = 0
@@ -282,9 +315,12 @@ class VAETrainStage(BaseStage):
                 self.optimizer_vae.zero_grad()
                 
                 feat_pred, A_pred, z = self.VGAE(features)
-                
-                # 仅重构损失
-                feat_loss = F.mse_loss(feat_pred[self.train_mask_vae], features.to_dense()[self.train_mask_vae])
+                # Use mixed precision if enabled
+                if self.use_amp:
+                    with autocast(device_type='cuda'):
+                        feat_loss = F.mse_loss(feat_pred[self.train_mask_vae], features_dense[self.train_mask_vae])
+                else:
+                    feat_loss = F.mse_loss(feat_pred[self.train_mask_vae], features_dense[self.train_mask_vae])
                 
                 if is_large_graph:
                     neg_edges = self._sample_negative_edges_gpu(num_nodes, self.pos_edges, num_neg)
@@ -292,14 +328,24 @@ class VAETrainStage(BaseStage):
                 else:
                     link_loss = self._compute_loss_small_graph(A_pred, adj_label, weight_tensor, norm)
                 
-                kl_loss = -0.5 / A_pred.size(0) * (1 + 2 * self.VGAE.log_std - self.VGAE.mean**2 - torch.exp(self.VGAE.log_std)**2).sum(1).mean()
+                # Use numerically stable KL loss
+                kl_loss = self.compute_kl_loss_stable(self.VGAE.mean, self.VGAE.log_std)
                 
                 loss = (self.config.vae.coef_link * link_loss + 
                        self.config.vae.coef_feat * feat_loss + 
                        self.config.vae.coef_kl * kl_loss)
                 
-                loss.backward()
-                self.optimizer_vae.step()
+                # Backward with mixed precision support
+                if self.use_amp:
+                    self.scaler.scale(loss).backward()
+                    self.scaler.unscale_(self.optimizer_vae)
+                    torch.nn.utils.clip_grad_norm_(self.VGAE.parameters(), max_norm=5.0)
+                    self.scaler.step(self.optimizer_vae)
+                    self.scaler.update()
+                else:
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.VGAE.parameters(), max_norm=5.0)
+                    self.optimizer_vae.step()
                 
                 if epoch % 10 == 0:
                     with torch.no_grad():
@@ -307,7 +353,7 @@ class VAETrainStage(BaseStage):
                     print(f"Pretrain epoch {epoch} | loss: {loss.item():.5f} | "
                           f"val_roc: {val_roc:.5f} | val_ap: {val_ap:.5f}")
             
-            # 使用预训练的隐变量初始化聚类中心
+
             print("\nInitializing cluster centers with K-means...")
             with torch.no_grad():
                 z = self.VGAE.encode(features)
@@ -333,8 +379,6 @@ class VAETrainStage(BaseStage):
         for epoch in range(self.config.vae.epoch):
             self.VGAE.train()
             self.optimizer_vae.zero_grad()
-            
-            # 前向传播
             if self.config.vae.name == "normal_vae":
                 feat_pred, A_pred = self.VGAE(features)
             elif self.config.vae.name == "vae_class":
@@ -345,11 +389,15 @@ class VAETrainStage(BaseStage):
                 feat_pred, A_pred, z = self.VGAE(features)
             else:
                 raise ValueError(f"Invalid vae name: {self.config.vae.name}")
-            
-            # 特征重构损失
-            feat_loss = F.mse_loss(feat_pred[self.train_mask_vae], features.to_dense()[self.train_mask_vae])
+            # Use automatic mixed precision for faster training
+            if self.use_amp:
+                with autocast(device_type='cuda'):
+                    feat_loss = F.mse_loss(feat_pred[self.train_mask_vae], features_dense[self.train_mask_vae])
+            else:
+                feat_loss = F.mse_loss(feat_pred[self.train_mask_vae], features_dense[self.train_mask_vae])
             
             # 链接预测损失（根据图大小选择策略）
+            # Note: This is computed outside autocast as it doesn't benefit much from FP16
             if is_large_graph:
                 # 每个epoch重新采样负边
                 neg_edges = self._sample_negative_edges_gpu(
@@ -361,7 +409,7 @@ class VAETrainStage(BaseStage):
             else:
                 link_loss = self._compute_loss_small_graph(A_pred, adj_label, weight_tensor, norm)
             
-            kl_loss = -0.5 / A_pred.size(0) * (1 + 2 * self.VGAE.log_std - self.VGAE.mean**2 - torch.exp(self.VGAE.log_std)**2).sum(1).mean()
+            kl_loss = self.compute_kl_loss_stable(self.VGAE.mean, self.VGAE.log_std)
             
             # 总损失
             loss = (self.config.vae.coef_link * link_loss + 
@@ -378,7 +426,7 @@ class VAETrainStage(BaseStage):
                 
                 if epoch < warmup_epochs:
                     # Warm-up阶段：线性增加权重
-                    cluster_weight = 0.1 + (5.0 - 0.1) * (epoch / warmup_epochs)
+                    cluster_weight = 0.5 + (5.0 - 0.5) * (epoch / warmup_epochs)
                 else:
                     # 稳定阶段：使用较大权重
                     cluster_weight = 5.0 + 5.0 * ((epoch - warmup_epochs) / (total_epochs - warmup_epochs))
@@ -401,22 +449,26 @@ class VAETrainStage(BaseStage):
 
             
             # 反向传播
-            loss.backward()
-            self.optimizer_vae.step()
+            if self.use_amp:
+                # Mixed precision backward
+                self.scaler.scale(loss).backward()
+                # Gradient clipping (unscale first)
+                self.scaler.unscale_(self.optimizer_vae)
+                torch.nn.utils.clip_grad_norm_(self.VGAE.parameters(), max_norm=5.0)
+                # Optimizer step with scaler
+                self.scaler.step(self.optimizer_vae)
+                self.scaler.update()
+            else:
+                # Standard backward
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.VGAE.parameters(), max_norm=5.0)
+                self.optimizer_vae.step()
             
-            # 验证（使用采样的验证集）
-            with torch.no_grad():
-                # if is_large_graph:
-                #     # 大图模式：只在采样边上计算准确率
-                #     train_acc = 0.0  # 大图模式下跳过全矩阵准确率计算
-                # else:
-                #     train_acc = get_acc(A_pred, adj_label)
-                
-                val_roc, val_ap = get_scores(val_edges, val_edges_false, A_pred, adj_orig)
-            
-            # 打印日志
-            if epoch%10 == 0:
-                # if is_large_graph:
+            # 验证（使用采样的验证集）- 减少验证频率以提高训练速度
+            if epoch % self.val_interval == 0:
+                with torch.no_grad():
+                    val_roc, val_ap = get_scores(val_edges, val_edges_false, A_pred, adj_orig)
+
                 if self.config.vae.name == "vae_dec":
                     print(f"VAE training: epoch {epoch} | train_loss: {loss.item():.5f} | "
                         f"feat_loss: {feat_loss.item():.5f} | link_loss: {link_loss.item():.5f} | "
@@ -440,19 +492,19 @@ class VAETrainStage(BaseStage):
                 #         f"kl_loss: {kl_loss.item():.5f} | train_acc: {train_acc:.5f} | "
                 #         f"val_roc: {val_roc:.5f} | val_ap: {val_ap:.5f}")
             
-            # 早停机制
-            if val_roc + val_ap > best_score:
-                best_score = val_roc + val_ap
-                best_epoch = epoch
-                self.best_vae_state = {k: v.cpu().clone() for k, v in self.VGAE.state_dict().items()}
-                self.best_optimizer_vae_state = {
-                    k: v.cpu().clone() if torch.is_tensor(v) else v 
-                    for k, v in self.optimizer_vae.state_dict().items()
-                }
-            else:
-                if epoch - best_epoch > self.config.vae.patience:
-                    print(f"Early stopping at epoch {epoch}")
-                    break
+
+                if val_roc >= 0 and val_roc + val_ap > best_score:
+                    best_score = val_roc + val_ap
+                    best_epoch = epoch
+                    self.best_vae_state = {k: v.cpu().clone() for k, v in self.VGAE.state_dict().items()}
+                    self.best_optimizer_vae_state = {
+                        k: v.cpu().clone() if torch.is_tensor(v) else v 
+                        for k, v in self.optimizer_vae.state_dict().items()
+                    }
+                else:
+                    if epoch - best_epoch > self.config.vae.patience:
+                        print(f"Early stopping at epoch {epoch}")
+                        break
         
         # 测试集评估
         with torch.no_grad():

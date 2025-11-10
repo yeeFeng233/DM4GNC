@@ -1,9 +1,8 @@
-
-dataset: CiteSeer
+dataset: ogbn-arxiv
 vae:
   name: "vae_class"
   weight_decay: 0.0005 # 0.0005
-  lr: 0.01               # 0.001
+  lr: 0.0005              # 0.0005 (降低20倍for超大图)
   dropout: 0.5
 
   epoch: 1500          # number of training epochs of vae 3000
@@ -20,7 +19,8 @@ vae:
   
   # GPU优化选项
   use_amp: true           # 禁用混合精度(稀疏矩阵不兼容)
-  val_interval: 5          # 验证间隔 (推荐: 5-10 epochs)
+  val_interval: 10         # 验证间隔 (超大图用更大间隔)
+  neg_ratio: 3             # 负采样比例 (超大图推荐: 2-3)
 
 diffusion:
   lr: 0.00001             # learning rate of diffusion
