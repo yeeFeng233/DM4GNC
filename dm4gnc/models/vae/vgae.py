@@ -176,13 +176,13 @@ class VGAE_DEC(nn.Module):
 
 class VGAE_DEC_class(nn.Module):
     def __init__(self, feat_dim, hidden_dim, latent_dim, adj, n_clusters=7, alpha=0.5):
-        super(VGAE_DEC, self).__init__()
+        super(VGAE_DEC_class, self).__init__()
         self.adj = adj
         self.n_clusters = n_clusters
         self.alpha = alpha
         
         self.encoder = GraphEncoder(feat_dim, hidden_dim, latent_dim, adj)
-        self.decoder = GraphDecoder(latent_dim, hidden_dim, feat_dim)
+        self.decoder = GraphDecoder_class(latent_dim, hidden_dim, feat_dim, n_clusters)
         
         self.cluster_centers = nn.Parameter(torch.Tensor(n_clusters, latent_dim))
         nn.init.xavier_uniform_(self.cluster_centers)
@@ -241,5 +241,5 @@ class VGAE_DEC_class(nn.Module):
     
     def forward(self, x):
         z = self.encode(x)
-        feat, A_pred = self.decode(z)
-        return feat, A_pred, z
+        feat, A_pred, class_pred = self.decode(z)
+        return feat, A_pred, class_pred, z
