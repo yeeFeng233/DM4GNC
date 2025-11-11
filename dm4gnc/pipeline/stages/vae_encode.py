@@ -79,7 +79,7 @@ class VAEEncodeStage(BaseStage):
 
         self.VGAE.eval()
         with torch.no_grad():
-            if self.config.vae.name == "normal_vae":
+            if self.config.vae.name in ["normal_vae", "vae_sig"]:
                 self.z = self.VGAE.encode(features)
             elif self.config.vae.name in ["vae_class", "vae_dec_class", "vae_dec"]:
                 self.z = self.VGAE.encode(features)
@@ -88,7 +88,7 @@ class VAEEncodeStage(BaseStage):
             else:
                 raise ValueError(f"Invalid vae name: {self.config.vae.name}")
 
-            if self.config.vae.name in ["normal_vae", "vae_dec", "vae_class_v2"]:
+            if self.config.vae.name in ["normal_vae", "vae_sig", "vae_dec", "vae_class_v2"]:
                 feat_pred, A_pred = self.VGAE.decode(self.z)
             elif self.config.vae.name in ["vae_class", "vae_dec_class"]:
                 feat_pred, A_pred, class_pred = self.VGAE.decode(self.z)

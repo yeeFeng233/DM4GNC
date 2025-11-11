@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .encoder import GraphEncoder, GraphEncoder_class
-from .decoder import GraphDecoder, GraphDecoder_class
+from .decoder import GraphDecoder, GraphDecoder_class, SparseDecoder
 
 class VGAE(nn.Module):
     def __init__(self, feat_dim, hidden_dim, latent_dim, adj):
@@ -243,3 +243,35 @@ class VGAE_DEC_class(nn.Module):
         z = self.encode(x)
         feat, A_pred, class_pred = self.decode(z)
         return feat, A_pred, class_pred, z
+
+class VGAE_SIG(nn.Module):
+    def __init__(self, feat_dim, hidden_dim, latent_dim, adj):
+        super(VGAE_SIG, self).__init__()
+        self.adj = adj
+        self.encoder = GraphEncoder(feat_dim, hidden_dim, latent_dim, adj)
+        self.decoder = SparseDecoder(latent_dim, hidden_dim, feat_dim)
+
+        self.mean = None
+        self.log_std = None
+
+    def reset_adj(self, adj):
+        self.adj = adj
+        self.encoder.reset_adj(adj)
+
+    def set_device(self,device):
+        self.adj = self.adj.to(device)
+        self.encoder.set_device(device)
+        self.decoder.set_device(device)
+
+    def encode(self, x):
+        z = self.encoder(x)
+        self.mean, self.log_std = self.encoder.mean, self.encoder.log_std
+        return z
+    
+    def decode(self, z):
+        return self.decoder(z)
+    
+    def forward(self, x):
+        z = self.encode(x)
+        feat, A_pred = self.decode(z)
+        return feat, A_pred

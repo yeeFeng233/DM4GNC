@@ -31,7 +31,7 @@ class ExperimentLogger:
         
         # create the timestamp of the experiment
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.experiment_name = f"{config.dataset}_{self.timestamp}"
+        self.experiment_name = f"{self.timestamp}_{config.dataset}_{config.vae.name}"
         
         # log file path
         self.log_file = self.log_dir / f"{self.experiment_name}.json"

@@ -319,7 +319,7 @@ class VAETrainStage(BaseStage):
         for epoch in range(self.config.vae.epoch):
             self.VGAE.train()
             self.optimizer_vae.zero_grad()
-            if self.config.vae.name == "normal_vae":
+            if self.config.vae.name in ["normal_vae", "vae_sig"]:
                 feat_pred, A_pred = self.VGAE(features)
             elif self.config.vae.name == "vae_class":
                 feat_pred, A_pred, class_pred = self.VGAE(features)

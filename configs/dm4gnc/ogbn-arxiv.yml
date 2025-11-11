@@ -7,7 +7,7 @@ vae:
 
   epoch: 1500          # number of training epochs of vae 3000
   hidden_sizes: [256, 128]            # MLP hidden layer sizes
-  coef_kl: 1.0            # coefficient for KL loss
+  coef_kl: 0.3          # coefficient for KL loss
   coef_feat: 1.0          # coefficient for reconstruction features loss
   coef_link: 1.0           # coefficient for reconstruction map loss
   neighbor_map_dim: 2708   # neighbor map dimension (number of dataset nodes)

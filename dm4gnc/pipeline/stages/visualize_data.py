@@ -110,7 +110,7 @@ class VisualizeDataStage(BaseStage):
 
     def _vae_encode_visualization(self):
         self._load_vae_encode_checkpoints()
-        save_path_root = os.path.join(self.output_dir, 'vae_encode')
+        save_path_root = os.path.join(self.output_dir, 'vae_encode_kl_ratio_{self.config.vae.coef_kl}')
         if not os.path.exists(save_path_root):
             os.makedirs(save_path_root)
         save_path_tsne = os.path.join(save_path_root, f'{self.config.vae.name}_tsne.png')
